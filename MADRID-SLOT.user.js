@@ -1,15 +1,15 @@
 // ==UserScript==
 // @name         MADRID SLOT
 // @namespace    http://tampermonkey.net/
-// @version      3.1
+// @version      3.2
 // @match        https://algeria.blsspainglobal.com/dza/appointment/slotselection*
 // @match        https://algeria.blsspainglobal.com/dza/appointment/visatype*
 // @match        https://algeria.blsspainglobal.com/dza/appointment/liveness*
 // @match        https://algeria.blsspainglobal.com/dza/appointment/payment*
 // @icon         https://cdn.pixabay.com/animation/2022/09/13/17/55/17-55-34-595_512.gif
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/YOUR_USERNAME/bls-scripts/main/MADRID-SLOT.user.js
-// @downloadURL  https://raw.githubusercontent.com/YOUR_USERNAME/bls-scripts/main/MADRID-SLOT.user.js
+// @updateURL    https://raw.githubusercontent.com/amine7500075-byte/bls-scripts/main/MADRID-SLOT.user.js
+// @downloadURL  https://raw.githubusercontent.com/amine7500075-byte/bls-scripts/main/MADRID-SLOT.user.js
 // @run-at       document-idle
 // ==/UserScript==
 
