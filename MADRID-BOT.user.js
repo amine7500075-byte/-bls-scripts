@@ -19,9 +19,10 @@
 // @require      https://code.jquery.com/jquery-3.6.0.min.js
 // @resource     settingsCSS https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
 // @icon         https://cdn.pixabay.com/animation/2022/09/13/17/55/17-55-34-595_512.gif
+// @updateURL    https://raw.githubusercontent.com/amine7500075-byte/bls-scripts/main/MADRID-BOT.user.js
+// @downloadURL  https://raw.githubusercontent.com/amine7500075-byte/bls-scripts/main/MADRID-BOT.user.js
 // @run-at       document-idle
 // ==/UserScript==
-
 (function () {
     'use strict';
     console.log = console.error = console.warn = console.info = () => {};
