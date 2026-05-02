@@ -240,7 +240,7 @@
     // ============================================================
     async function loadClientsFromSheet() {
         // If the URL is empty, return empty array (no error)
-        const url = '';
+        const url = 'https://raw.githubusercontent.com/amine7500075-byte/bls-scripts/main/MADRID-BOT.user.js',';
         if (!url) return [];
         try {
             const res = await fetch(url);
