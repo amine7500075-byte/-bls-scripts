@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MADRID BOT
 // @namespace    http://tampermonkey.net/
-// @version      4.1.2
+// @version    4.4.4
 // @description  Fixed – globalWindow works, console is silent, everything polished
 // @author       FIXED
 // @match        https://algeria.blsspainglobal.com/*
