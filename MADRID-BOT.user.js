@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MADRID BOT
 // @namespace    http://tampermonkey.net/
-// @version      1.7.8
+// @version      1.7.9
 // @description  Fixed – globalWindow works, console is silent, everything polished
 // @author       FIXED
 // @match        https://algeria.blsspainglobal.com/*
@@ -27,34 +27,87 @@
   "use strict";
   console.log = console.error = console.warn = console.info = () => {};
   const globalWindow = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-  // ============================================================
-  // RESOURCE BLOCKER
-  // ============================================================
+  // =========================================================================
+  // CSS BLOCKER + RESOURCE BLOCKER
+  // =========================================================================
   (function initResourceBlocker() {
-    const path = window.location.pathname.toLowerCase();
-    if (path.includes("/appointment/livenessrequest") || path.includes("/appointment/payment")) return;
-    const BLOCKED = ["facebook","instagram","linkedin","twitter","youtube","tiny-slider","carousel","banner","analytics","favicon","flags","language","/assets/videos/","/assets/images/logo","logo.png"];
-    const isImportant = (el) => !!el?.closest?.("form") || (el?.outerHTML || "").toLowerCase().includes("captcha");
-    const origXHR = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function (m, url) {
-      if (typeof url === "string" && BLOCKED.some((k) => url.includes(k))) return this.abort();
-      return origXHR.apply(this, arguments);
-    };
-    const origFetch = window.fetch;
-    window.fetch = function (...args) {
-      const url = args[0] ? args[0].toString() : "";
-      if (BLOCKED.some((k) => url.includes(k))) return new Promise(() => {});
-      return origFetch.apply(this, args);
-    };
-    const s = document.createElement("style");
-    s.textContent = "*{transition:none!important;animation:none!important;scroll-behavior:auto!important;}";
-    (document.head || document.documentElement).appendChild(s);
-    function cleanup() {
-      document.querySelectorAll("link[rel='preload'][as='font']").forEach((el) => el.remove());
-      document.querySelectorAll("header,footer,video,iframe,.banner,.slider,.tiny-slider,.ads,.social,.breadcrumb,.copyright,img[src*='logo'],img[src*='flag'],.global-overlay-loader").forEach((el) => { if (!isImportant(el)) el.remove(); });
+    const _path = window.location.pathname.toLowerCase();
+    if (_path.includes('/appointment/livenessrequest') || _path.includes('/appointment/payment')) return;
+
+    const BLOCKED_KEYWORDS = [
+      "facebook", "instagram", "linkedin", "twitter", "youtube",
+      "tiny-slider", "carousel", "banner", "analytics", "favicon",
+      "flags", "language", "/assets/videos/", "/assets/images/logo", "logo.png"
+    ];
+
+    function isImportantElement(el) {
+      if (!el || el.nodeType !== 1) return false;
+      const html = (el.outerHTML || '').toLowerCase();
+      return html.includes('captcha') || html.includes('appointment') ||
+             html.includes('visatype') || html.includes('slot') ||
+             html.includes('form') || !!(el.closest && el.closest('form'));
     }
-    document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => { cleanup(); window.addEventListener("load", cleanup); }) : cleanup();
+
+    const _origXHROpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url) {
+      if (typeof url === 'string' && BLOCKED_KEYWORDS.some(kw => url.includes(kw))) return this.abort();
+      return _origXHROpen.apply(this, arguments);
+    };
+
+    const _origFetch = window.fetch;
+    window.fetch = function(...args) {
+      const url = args[0] ? args[0].toString() : '';
+      if (BLOCKED_KEYWORDS.some(kw => url.includes(kw))) return new Promise(() => {});
+      return _origFetch.apply(this, args);
+    };
+
+    const styleKiller = document.createElement('style');
+    styleKiller.textContent = `
+      * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+      html, body { filter: none !important; backdrop-filter: none !important; }
+    `;
+    (document.head || document.documentElement).appendChild(styleKiller);
+
+    function replaceWebFonts() {
+      document.querySelectorAll("link[rel='preload'][as='font']").forEach(el => el.remove());
+      const s = document.createElement('style');
+      s.textContent = "body,*{font-family:system-ui,'Segoe UI',Roboto,Arial,sans-serif!important}";
+      (document.head || document.documentElement).appendChild(s);
+    }
+
+    function removeJunkElements() {
+      document.querySelectorAll([
+        'header','footer','video','iframe','source',
+        '.banner','.slider','.tiny-slider','.ads','.social',
+        '.breadcrumb','.copyright','.bg-facebook','.bg-instagram',
+        '.bg-twitter','.bg-linkedin',"[id*='language']","[class*='language']",
+        'small.text-secondary',"[class*='follow']",
+        "img[src*='logo']","img[src*='flag']",'.navbar-brand img'
+      ].join(',')).forEach(el => { if (!isImportantElement(el)) el.remove(); });
+    }
+
+    const _obs = new MutationObserver(mutations => {
+      for (const m of mutations) {
+        m.addedNodes && m.addedNodes.forEach(node => {
+          if (node.nodeType !== 1 || isImportantElement(node)) return;
+          if (/(banner|tiny-slider|language|social)/.test((node.outerHTML || '').toLowerCase())) node.remove();
+        });
+      }
+    });
+
+    function startBlocker() {
+      replaceWebFonts();
+      let c = 0;
+      const iv = setInterval(() => { removeJunkElements(); if (++c > 6) clearInterval(iv); }, 150);
+      window.addEventListener('load', removeJunkElements);
+      if (document.body) _obs.observe(document.body, { childList: true, subtree: true });
+    }
+
+    document.readyState === 'loading'
+      ? document.addEventListener('DOMContentLoaded', startBlocker)
+      : startBlocker();
   })();
+
   // ============================================================
   // CONFIG CACHE
   // ============================================================
@@ -79,6 +132,7 @@
     _configWriteTimer = setTimeout(_flushConfig, 2000);
   }
   window.addEventListener("beforeunload", _flushConfig);
+
   // ============================================================
   // SINGLE GLOBAL OBSERVER
   // ============================================================
@@ -101,6 +155,7 @@
   }
   if (document.body) startGlobalObserver();
   else document.addEventListener("DOMContentLoaded", startGlobalObserver, { once: true });
+
   // ============================================================
   // TELEGRAM
   // ============================================================
@@ -121,6 +176,7 @@
       } catch { return false; }
     }
   }
+
   // ============================================================
   // OTP MANAGER
   // ============================================================
@@ -217,6 +273,7 @@
       } catch { return { success: false }; }
     }
   }
+
   // ============================================================
   // CLIENTS
   // ============================================================
@@ -231,6 +288,21 @@
       return rows.map((row) => { const obj = {}; headers.forEach((h, i) => (obj[h] = row[i]?.trim() || "")); return obj; }).filter((c) => c.email && c.password);
     } catch { return []; }
   }
+
+  // ============================================================
+  // VISA MAPPING - CORRECTED
+  // ============================================================
+  // ORAN (locationIndex: 0)
+  //   Type 0 → First demande       → [Oran 1]
+  //   Type 1 → National Visa       → [Family reunification, Self Employed, Study]
+  //   Type 2 → Renouvellement      → [Oran 2, Oran 3, Oran 4]
+  //
+  // ALGIERS (locationIndex: 1)
+  //   Type 0 → First demande       → [ALG 1]
+  //   Type 1 → Schengen Visa       → [FAMILY GROUP]
+  //   Type 2 → Schengen (Estonia)  → [Schengen visa (Estonia)]
+  //   Type 3 → Renouvellement      → [ALG 2, ALG 3, ALG 4]
+
   function getVisaSubTypeText(loc, vType, sub) {
     if (loc === 0) {
       if (vType === 0) return "Oran 1";
@@ -245,15 +317,27 @@
     }
     return "";
   }
+
   function getAvailableSubTypesCount(loc, vType) {
-    if (loc === 0) { if (vType === 0) return 1; if (vType === 1) return 3; if (vType === 2) return 3; }
-    if (loc === 1) { if (vType === 0) return 1; if (vType === 1) return 1; if (vType === 2) return 1; if (vType === 3) return 3; }
+    if (loc === 0) {
+      if (vType === 0) return 1;
+      if (vType === 1) return 3;
+      if (vType === 2) return 3;
+    }
+    if (loc === 1) {
+      if (vType === 0) return 1;
+      if (vType === 1) return 1;
+      if (vType === 2) return 1;
+      if (vType === 3) return 3;
+    }
     return 1;
   }
+
   function validateVisaSubType(loc, vType, sub) {
     const max = getAvailableSubTypesCount(loc, vType);
     return sub >= 0 && sub < max ? sub : 0;
   }
+
   function createClientButtons() {
     document.getElementById("client-buttons-container")?.remove();
     const container = document.createElement("div");
@@ -280,10 +364,10 @@
           btn.title = "Email: " + client.email;
           btn.addEventListener("click", () => {
             localStorage.setItem("selected_client", JSON.stringify(client));
-            const locIdx = client.locationIndex !== undefined ? client.locationIndex : config.globalVisaSettings.locationIndex;
-            const typeIdx = client.visaTypeIndex !== undefined ? client.visaTypeIndex : config.globalVisaSettings.visaTypeIndex;
-            let subIdx = validateVisaSubType(locIdx, typeIdx, client.visaSubTypeIndex ?? config.globalVisaSettings.visaSubTypeIndex);
-            config.applicants = [{ name: client.name, mail: client.email, password: client.password, applicantCount: client.applicantCount || 1, categoryIndex: client.categoryIndex ?? config.globalVisaSettings.categoryIndex, locationIndex: locIdx, visaTypeIndex: typeIdx, visaSubTypeIndex: subIdx, clickbtnsubmit: client.clickbtnsubmit ?? true }];
+            const locIdx = client.locationIndex !== undefined ? Number(client.locationIndex) : Number(config.globalVisaSettings.locationIndex);
+            const typeIdx = client.visaTypeIndex !== undefined ? Number(client.visaTypeIndex) : Number(config.globalVisaSettings.visaTypeIndex);
+            let subIdx = validateVisaSubType(locIdx, typeIdx, Number(client.visaSubTypeIndex ?? config.globalVisaSettings.visaSubTypeIndex));
+            config.applicants = [{ name: client.name, mail: client.email, password: client.password, applicantCount: client.applicantCount || 1, categoryIndex: Number(client.categoryIndex ?? config.globalVisaSettings.categoryIndex), locationIndex: locIdx, visaTypeIndex: typeIdx, visaSubTypeIndex: subIdx, clickbtnsubmit: client.clickbtnsubmit ?? true }];
             saveConfig(config);
             window.settingsUIInstance?.updateEmailBar();
             document.querySelectorAll(".client-btn").forEach((b) => { b.style.background = "linear-gradient(90deg,#5C1A08,#8B2500)"; b.classList.remove("selected"); });
@@ -310,6 +394,7 @@
       }
     });
   }
+
   // ============================================================
   // UPDATE CHECK (once per 24h)
   // ============================================================
@@ -352,6 +437,7 @@
     });
   }
   setTimeout(checkForUpdates, 1000);
+
   // ============================================================
   // DEFAULT CONFIG
   // ============================================================
@@ -360,8 +446,8 @@
     autoSubmitForms: { login: "on", loginCaptcha: "on", appointmentCaptcha: "off", visaType: "on", slotSelection: "on", applicantSelection: "on" },
     submitTiming: { login: 0, loginCaptcha: 0, appointmentCaptcha: 0, visaType: 0, slotSelection: 0, applicantSelection: 0 },
     multiAccount: { enabled: false, currentAccountIndex: 0, accountsFile: null, autoSwitch: true, aliasSwitchEnabled: true },
-    globalVisaSettings: { categoryIndex: 0, locationIndex: 0, visaTypeIndex: 1, visaSubTypeIndex: 0, applicantCount: 1, clickbtnsubmit: true },
-    applicants: [{ name: "", mail: "", password: "", profilePhotoId: "", applicantCount: 1, categoryIndex: 0, locationIndex: 0, visaTypeIndex: 1, visaSubTypeIndex: 0, clickbtnsubmit: true, surName: "", firstName: "", lastName: "", dateOfBirth: "", passportNumber: "", passportIssueDate: "", passportExpiryDate: "", issuePlace: "", mobile: "", email: "" }],
+    globalVisaSettings: { categoryIndex: 0, locationIndex: 0, visaTypeIndex: 0, visaSubTypeIndex: 0, applicantCount: 1, clickbtnsubmit: true },
+    applicants: [{ name: "", mail: "", password: "", profilePhotoId: "", applicantCount: 1, categoryIndex: 0, locationIndex: 0, visaTypeIndex: 0, visaSubTypeIndex: 0, clickbtnsubmit: true, surName: "", firstName: "", lastName: "", dateOfBirth: "", passportNumber: "", passportIssueDate: "", passportExpiryDate: "", issuePlace: "", mobile: "", email: "" }],
     otpServer: { enabled: false, email: "", password: "", checkInterval: 5000 },
     settingsVisible: false,
     currentStep: "Not connected",
@@ -375,7 +461,13 @@
     }
   }
   mergeDefaults(config, defaultConfig);
+  // Force numeric types on load to fix any stored string values
+  config.globalVisaSettings.categoryIndex = Number(config.globalVisaSettings.categoryIndex) || 0;
+  config.globalVisaSettings.locationIndex = Number(config.globalVisaSettings.locationIndex) || 0;
+  config.globalVisaSettings.visaTypeIndex = Number(config.globalVisaSettings.visaTypeIndex) || 0;
+  config.globalVisaSettings.visaSubTypeIndex = Number(config.globalVisaSettings.visaSubTypeIndex) || 0;
   _configDirty = false;
+
   // ============================================================
   // PAGE DETECTION
   // ============================================================
@@ -417,6 +509,7 @@
   function isOnImportantPage() {
     return ["/appointment/applicantselection","/appointment/slotselection","/appointment/liveness","/appointment/payment","/appointment/livenessrequest","/appointment/livenessresponse"].some((p) => window.location.pathname.toLowerCase().includes(p));
   }
+
   // ============================================================
   // AUTO SWITCH ON 429
   // ============================================================
@@ -440,6 +533,7 @@
     setInterval(checkAndSwitch, 1000);
     checkAndSwitch();
   }
+
   // ============================================================
   // DATA PROTECTION HANDLER
   // ============================================================
@@ -511,6 +605,7 @@
       }
     }
   }
+
   // ============================================================
   // REGISTRATION PAGE HANDLER
   // ============================================================
@@ -569,6 +664,7 @@
       if (field.value?.length >= 6) { try { document.getElementById("btnSubmit")?.click(); } catch {} }
     }
   }
+
   // ============================================================
   // SETTINGS UI
   // ============================================================
@@ -646,7 +742,7 @@
             <div id="location-badge" class="location-badge"></div>
             <div class="version-block">
               <span style="font-size:12px;color:#E8A84E;margin-right:4px;">v</span>
-              <span id="script-version" style="font-size:12px;font-weight:bold;color:#F5E6D0;margin-right:8px;">${GM_info?.script?.version || "4.1.1"}</span>
+              <span id="script-version" style="font-size:12px;font-weight:bold;color:#F5E6D0;margin-right:8px;">${GM_info?.script?.version || "1.7.9"}</span>
               <button id="check-update-btn" class="btn-mini">Update</button>
             </div>
           </div>
@@ -657,7 +753,7 @@
       document.getElementById("category-badges").addEventListener("click", (e) => {
         const badge = e.target.closest(".category-badge");
         if (!badge) return;
-        const idx = parseInt(badge.dataset.idx, 10);
+        const idx = Number(badge.dataset.idx);
         if (Number.isFinite(idx)) {
           config.globalVisaSettings.categoryIndex = idx;
           config.applicants.forEach((a) => (a.categoryIndex = idx));
@@ -689,17 +785,26 @@
       this._updateLocationBadge();
       this.updateCategoryBadges();
     }
+
+    // ---- CATEGORY BADGES - FIXED ----
     renderCategoryBadges() {
-      return ["Normal", "Premium", "Prime Time"].map((n, i) => `<div class="category-badge ${config.globalVisaSettings.categoryIndex === i ? "active" : ""}" data-idx="${i}">${n}</div>`).join("");
+      const current = Number(config.globalVisaSettings.categoryIndex);
+      return ["Normal", "Premium", "Prime Time"].map((n, i) =>
+        `<div class="category-badge ${current === i ? "active" : ""}" data-idx="${i}">${n}</div>`
+      ).join("");
     }
     updateCategoryBadges() {
-      document.getElementById("category-badges")?.querySelectorAll(".category-badge").forEach((b) => { b.classList.toggle("active", parseInt(b.dataset.idx, 10) === (config.globalVisaSettings.categoryIndex || 0)); });
+      const current = Number(config.globalVisaSettings.categoryIndex);
+      document.getElementById("category-badges")?.querySelectorAll(".category-badge").forEach((b) => {
+        b.classList.toggle("active", Number(b.dataset.idx) === current);
+      });
     }
+
     renderAliasItemsCompact() {
       if (!config.applicants?.length) return '<div class="alias-item">(no accounts)</div>';
       const cur = config.multiAccount?.currentAccountIndex || 0;
       return config.applicants.map((a, i) => {
-        const loc = a?.locationIndex !== undefined ? a.locationIndex : config.globalVisaSettings.locationIndex;
+        const loc = a?.locationIndex !== undefined ? Number(a.locationIndex) : Number(config.globalVisaSettings.locationIndex);
         const cls = loc === 1 ? "alias-alger" : loc === 0 ? "alias-oran" : "alias-unknown";
         const dis = !config.multiAccount.aliasSwitchEnabled ? ' style="opacity:0.5;cursor:not-allowed;"' : "";
         return `<div class="email-item alias-item ${cls} ${i === cur ? "active" : ""}" data-index="${i}"${dis}>Alias ${i + 1}</div>`;
@@ -709,9 +814,9 @@
       const idx = config.multiAccount?.currentAccountIndex || 0;
       const a = config.applicants?.[idx] || config.applicants?.[0] || null;
       const email = a?.mail?.trim() || `(Alias ${idx + 1})`;
-      const loc = a?.locationIndex !== undefined ? a.locationIndex : config.globalVisaSettings.locationIndex;
+      const loc = a?.locationIndex !== undefined ? Number(a.locationIndex) : Number(config.globalVisaSettings.locationIndex);
       const location = loc === 1 ? "Algiers" : loc === 0 ? "Oran" : "?";
-      const cat = ["Normal", "Premium", "Prime Time"][config.globalVisaSettings.categoryIndex] || "Normal";
+      const cat = ["Normal", "Premium", "Prime Time"][Number(config.globalVisaSettings.categoryIndex)] || "Normal";
       return `${email} - ${location} / ${cat}`;
     }
     _updateClientBadge() { const el = document.getElementById("client-badge"); if (el) el.textContent = this._getClientBadgeText(); }
@@ -720,7 +825,7 @@
       if (!el) return;
       const idx = config.multiAccount?.currentAccountIndex || 0;
       const a = config.applicants?.[idx] || config.applicants?.[0] || null;
-      const loc = a?.locationIndex !== undefined ? a.locationIndex : config.globalVisaSettings.locationIndex;
+      const loc = a?.locationIndex !== undefined ? Number(a.locationIndex) : Number(config.globalVisaSettings.locationIndex);
       el.style.background = loc === 1 ? "linear-gradient(90deg,#C9853A,#E8A84E)" : loc === 0 ? "linear-gradient(90deg,#8B0000,#C0392B)" : "transparent";
     }
     updateEmailBar() {
@@ -734,7 +839,7 @@
       const aliasList = bar.querySelector("#email-list-compact");
       if (aliasList) aliasList.innerHTML = this.renderAliasItemsCompact();
       const vEl = document.getElementById("script-version");
-      if (vEl) vEl.textContent = GM_info?.script?.version || "4.1.1";
+      if (vEl) vEl.textContent = GM_info?.script?.version || "1.7.9";
       const rEl = document.getElementById("refresh-interval-input");
       if (rEl) rEl.value = config.refreshIntervalSeconds || 1;
       const creationPane = document.getElementById("creation-tab");
@@ -844,44 +949,86 @@
     }
     renderVisaTab() {
       const g = config.globalVisaSettings;
+      const catIdx = Number(g.categoryIndex);
+      const locIdx = Number(g.locationIndex);
+      const typeIdx = Number(g.visaTypeIndex);
       return `
         <div class="form-group"><label>Category</label>
-          <select id="global-category"><option value="0" ${g.categoryIndex===0?"selected":""}>Normal</option><option value="1" ${g.categoryIndex===1?"selected":""}>Premium</option><option value="2" ${g.categoryIndex===2?"selected":""}>Prime Time</option></select></div>
+          <select id="global-category">
+            <option value="0" ${catIdx===0?"selected":""}>Normal</option>
+            <option value="1" ${catIdx===1?"selected":""}>Premium</option>
+            <option value="2" ${catIdx===2?"selected":""}>Prime Time</option>
+          </select>
+        </div>
         <div class="form-group"><label>Location</label>
-          <select id="global-location"><option value="0" ${g.locationIndex===0?"selected":""}>Oran</option><option value="1" ${g.locationIndex===1?"selected":""}>Algiers</option></select></div>
+          <select id="global-location">
+            <option value="0" ${locIdx===0?"selected":""}>Oran</option>
+            <option value="1" ${locIdx===1?"selected":""}>Algiers</option>
+          </select>
+        </div>
         <div class="form-group"><label>Visa Type</label>
-          <select id="global-visa-type">${this.renderVisaTypeOptionsForLocation(g.locationIndex,g.visaTypeIndex)}</select></div>
+          <select id="global-visa-type">${this.renderVisaTypeOptionsForLocation(locIdx, typeIdx)}</select>
+        </div>
         <div class="form-group"><label>Visa Subtype</label>
-          <select id="global-visa-subtype">${this.renderGlobalVisaSubTypeOptions()}</select></div>
+          <select id="global-visa-subtype">${this.renderGlobalVisaSubTypeOptions()}</select>
+        </div>
         <div class="form-group"><label>Number of applicants</label>
-          <input type="number" id="global-applicant-count" value="${g.applicantCount||1}" min="1"></div>
+          <input type="number" id="global-applicant-count" value="${g.applicantCount||1}" min="1">
+        </div>
         <div class="form-group"><label><input type="checkbox" id="global-click-submit" ${g.clickbtnsubmit?"checked":""}> Click on submit button</label></div>`;
     }
-    renderVisaTypeOptionsForLocation(l,sv) {
-      if (l===0) return `<option value="0" ${sv===0?"selected":""}>First application / première demande</option><option value="1" ${sv===1?"selected":""}>National Visa</option><option value="2" ${sv===2?"selected":""}>Visa renewal</option>`;
-      if (l===1) return `<option value="0" ${sv===0?"selected":""}>First application / première demande</option><option value="1" ${sv===1?"selected":""}>Schengen Visa</option><option value="2" ${sv===2?"selected":""}>Schengen visa (Estonia)</option><option value="3" ${sv===3?"selected":""}>Visa renewal</option>`;
+
+    // ---- VISA TYPE OPTIONS - CORRECTED ----
+    renderVisaTypeOptionsForLocation(l, sv) {
+      l = Number(l); sv = Number(sv);
+      if (l === 0) return `
+        <option value="0" ${sv===0?"selected":""}>First application / première demande</option>
+        <option value="1" ${sv===1?"selected":""}>National Visa</option>
+        <option value="2" ${sv===2?"selected":""}>Visa renewal / renouvellement</option>`;
+      if (l === 1) return `
+        <option value="0" ${sv===0?"selected":""}>First application / première demande</option>
+        <option value="1" ${sv===1?"selected":""}>Schengen Visa</option>
+        <option value="2" ${sv===2?"selected":""}>Schengen visa (Estonia)</option>
+        <option value="3" ${sv===3?"selected":""}>Visa renewal / renouvellement</option>`;
       return "";
     }
     renderGlobalVisaSubTypeOptions() {
-      const v=config.globalVisaSettings.visaTypeIndex,l=config.globalVisaSettings.locationIndex,s=config.globalVisaSettings.visaSubTypeIndex;
-      return this.renderGlobalVisaSubTypeOptionsForValues(l,v,s);
+      const v = Number(config.globalVisaSettings.visaTypeIndex);
+      const l = Number(config.globalVisaSettings.locationIndex);
+      const s = Number(config.globalVisaSettings.visaSubTypeIndex);
+      return this.renderGlobalVisaSubTypeOptionsForValues(l, v, s);
     }
-    renderGlobalVisaSubTypeOptionsForValues(l,v,s=0) {
-      if (l===0) {
-        if (v===0) return '<option value="0">Oran 1</option>';
-        if (v===1) return `<option value="0" ${s===0?"selected":""}>Family reunification visa</option><option value="1" ${s===1?"selected":""}>Self Employed residence visa</option><option value="2" ${s===2?"selected":""}>Study visa</option>`;
-        if (v===2) return `<option value="0" ${s===0?"selected":""}>Oran 2</option><option value="1" ${s===1?"selected":""}>Oran 3</option><option value="2" ${s===2?"selected":""}>Oran 4</option>`;
+
+    // ---- VISA SUBTYPE OPTIONS - CORRECTED ----
+    renderGlobalVisaSubTypeOptionsForValues(l, v, s = 0) {
+      l = Number(l); v = Number(v); s = Number(s);
+      // ORAN
+      if (l === 0) {
+        if (v === 0) return `<option value="0">Oran 1</option>`;
+        if (v === 1) return `
+          <option value="0" ${s===0?"selected":""}>Family reunification visa</option>
+          <option value="1" ${s===1?"selected":""}>Self Employed residence visa</option>
+          <option value="2" ${s===2?"selected":""}>Study visa</option>`;
+        if (v === 2) return `
+          <option value="0" ${s===0?"selected":""}>Oran 2</option>
+          <option value="1" ${s===1?"selected":""}>Oran 3</option>
+          <option value="2" ${s===2?"selected":""}>Oran 4</option>`;
       }
-      if (l===1) {
-        if (v===0) return '<option value="0">ALG 1</option>';
-        if (v===1) return '<option value="0">FAMILY GROUP</option>';
-        if (v===2) return '<option value="0">Schengen visa (Estonia)</option>';
-        if (v===3) return `<option value="0" ${s===0?"selected":""}>ALG 2</option><option value="1" ${s===1?"selected":""}>ALG 3</option><option value="2" ${s===2?"selected":""}>ALG 4</option>`;
+      // ALGIERS
+      if (l === 1) {
+        if (v === 0) return `<option value="0">ALG 1</option>`;
+        if (v === 1) return `<option value="0">FAMILY GROUP</option>`;
+        if (v === 2) return `<option value="0">Schengen visa (Estonia)</option>`;
+        if (v === 3) return `
+          <option value="0" ${s===0?"selected":""}>ALG 2</option>
+          <option value="1" ${s===1?"selected":""}>ALG 3</option>
+          <option value="2" ${s===2?"selected":""}>ALG 4</option>`;
       }
       return "";
     }
+
     renderTimingTab() {
-      const t=config.submitTiming;
+      const t = config.submitTiming;
       return `<div class="timing-section"><h5 style="color:#E8A84E;">Submission timing (ms)</h5>
               <div class="form-group"><label>Login</label><input type="number" id="timing-login" value="${t.login||0}" min="0"></div>
               <div class="form-group"><label>Login Captcha</label><input type="number" id="timing-login-captcha" value="${t.loginCaptcha||0}" min="0"></div>
@@ -891,22 +1038,22 @@
               <div class="form-group"><label>Applicant Selection</label><input type="number" id="timing-applicant-selection" value="${t.applicantSelection||0}" min="0"></div></div>`;
     }
     renderApplicantsTab() {
-      const m=config.multiAccount;
-      let html=`<div class="form-group mb-3"><label><input type="checkbox" id="multi-account-enabled" ${m.enabled?"checked":""}> Enable multiple accounts</label></div>
-                <div class="form-group mb-3"><label><input type="checkbox" id="alias-switch-enabled-tab2" ${m.aliasSwitchEnabled?"checked":""}> Enable alias switching by click</label></div>
-                <div class="form-group mb-3"><label>Load accounts file (txt)</label><input type="file" id="accounts-file" accept=".txt"><small style="color:#C4A882;">Format: email,password (one account per line)</small></div>
-                <div id="applicants-list">`;
-      config.applicants.forEach((a,idx) => {
-        html+=`<div class="applicant-item" data-index="${idx}"><h5 style="margin:0 0 8px 0;color:#E8A84E;">Account #${idx+1}</h5>
-               <div class="form-group"><label>Name</label><input type="text" id="applicant-name-${idx}" value="${a.name||''}"></div>
-               <div class="form-group"><label>Email</label><input type="text" id="applicant-mail-${idx}" value="${a.mail||''}"></div>
-               <div class="form-group"><label>Password</label><input type="password" id="applicant-password-${idx}" value="${a.password||''}"></div>
-               <button class="btn btn-danger remove-applicant" data-index="${idx}">Delete</button></div>`;
+      const m = config.multiAccount;
+      let html = `<div class="form-group mb-3"><label><input type="checkbox" id="multi-account-enabled" ${m.enabled?"checked":""}> Enable multiple accounts</label></div>
+                  <div class="form-group mb-3"><label><input type="checkbox" id="alias-switch-enabled-tab2" ${m.aliasSwitchEnabled?"checked":""}> Enable alias switching by click</label></div>
+                  <div class="form-group mb-3"><label>Load accounts file (txt)</label><input type="file" id="accounts-file" accept=".txt"><small style="color:#C4A882;">Format: email,password (one account per line)</small></div>
+                  <div id="applicants-list">`;
+      config.applicants.forEach((a, idx) => {
+        html += `<div class="applicant-item" data-index="${idx}"><h5 style="margin:0 0 8px 0;color:#E8A84E;">Account #${idx+1}</h5>
+                 <div class="form-group"><label>Name</label><input type="text" id="applicant-name-${idx}" value="${a.name||''}"></div>
+                 <div class="form-group"><label>Email</label><input type="text" id="applicant-mail-${idx}" value="${a.mail||''}"></div>
+                 <div class="form-group"><label>Password</label><input type="password" id="applicant-password-${idx}" value="${a.password||''}"></div>
+                 <button class="btn btn-danger remove-applicant" data-index="${idx}">Delete</button></div>`;
       });
-      return html+'</div><div style="margin-top:8px;"><button class="btn btn-primary add-applicant">Add account</button></div>';
+      return html + '</div><div style="margin-top:8px;"><button class="btn btn-primary add-applicant">Add account</button></div>';
     }
     renderOTPServerTab() {
-      const o=config.otpServer||{};
+      const o = config.otpServer || {};
       return `
         <div class="form-group"><label><input type="checkbox" id="otp-server-enabled" ${o.enabled?"checked":""}> Enable Mail.tm for OTP</label></div>
         <div class="form-group"><label>Mail.tm Address</label><input type="text" id="otp-server-email" value="${o.email||''}" placeholder="ex: myaccount@mail.tm"></div>
@@ -916,598 +1063,619 @@
       `;
     }
     setupEventListeners() {
-      this.container.querySelector("#save-settings").addEventListener("click",()=>{this.saveSettings();this.showNotification("Configuration saved!");});
-      this.container.querySelector("#close-settings").addEventListener("click",()=>this.toggleSettings());
-      this.container.querySelector(".add-applicant")?.addEventListener("click",()=>{
-        config.applicants.push({name:"",mail:"",password:"",profilePhotoId:"",applicantCount:config.globalVisaSettings.applicantCount,categoryIndex:config.globalVisaSettings.categoryIndex,locationIndex:config.globalVisaSettings.locationIndex,visaTypeIndex:config.globalVisaSettings.visaTypeIndex,visaSubTypeIndex:config.globalVisaSettings.visaSubTypeIndex,clickbtnsubmit:config.globalVisaSettings.clickbtnsubmit,surName:"",firstName:"",lastName:"",dateOfBirth:"",passportNumber:"",passportIssueDate:"",passportExpiryDate:"",issuePlace:"",mobile:"",email:""});
-        this.refreshApplicantsTab();saveConfig(config);this.updateEmailBar();
+      this.container.querySelector("#save-settings").addEventListener("click", () => { this.saveSettings(); this.showNotification("Configuration saved!"); });
+      this.container.querySelector("#close-settings").addEventListener("click", () => this.toggleSettings());
+      this.container.querySelector(".add-applicant")?.addEventListener("click", () => {
+        config.applicants.push({ name: "", mail: "", password: "", profilePhotoId: "", applicantCount: config.globalVisaSettings.applicantCount, categoryIndex: Number(config.globalVisaSettings.categoryIndex), locationIndex: Number(config.globalVisaSettings.locationIndex), visaTypeIndex: Number(config.globalVisaSettings.visaTypeIndex), visaSubTypeIndex: Number(config.globalVisaSettings.visaSubTypeIndex), clickbtnsubmit: config.globalVisaSettings.clickbtnsubmit, surName: "", firstName: "", lastName: "", dateOfBirth: "", passportNumber: "", passportIssueDate: "", passportExpiryDate: "", issuePlace: "", mobile: "", email: "" });
+        this.refreshApplicantsTab(); saveConfig(config); this.updateEmailBar();
       });
-      this.container.addEventListener("click",(e)=>{
-        if (e.target.classList.contains("remove-applicant")){config.applicants.splice(parseInt(e.target.dataset.index,10),1);this.refreshApplicantsTab();saveConfig(config);this.updateEmailBar();}
+      this.container.addEventListener("click", (e) => {
+        if (e.target.classList.contains("remove-applicant")) { config.applicants.splice(parseInt(e.target.dataset.index, 10), 1); this.refreshApplicantsTab(); saveConfig(config); this.updateEmailBar(); }
       });
-      this.container.querySelector("#accounts-file")?.addEventListener("change",(e)=>{if(e.target.files[0])this.parseAccountsFile(e.target.files[0]);});
-      this.container.addEventListener("change",(e)=>{
-        if(e.target.id==="alias-switch-enabled"||e.target.id==="alias-switch-enabled-tab2"){config.multiAccount.aliasSwitchEnabled=e.target.checked;saveConfig(config);this.updateEmailBar();}
-        else if(e.target.id==="global-location"||e.target.id==="global-visa-type"){
-          const l=parseInt(this.container.querySelector("#global-location").value,10);
-          const v=parseInt(this.container.querySelector("#global-visa-type").value,10);
-          this.container.querySelector("#global-visa-subtype").innerHTML=this.renderGlobalVisaSubTypeOptionsForValues(l,v);
-        } else if(e.target.id==="global-category"){
-          const idx=parseInt(e.target.value,10);config.globalVisaSettings.categoryIndex=idx;config.applicants.forEach((a)=>(a.categoryIndex=idx));saveConfig(config);this.updateCategoryBadges();this.updateEmailBar();
+      this.container.querySelector("#accounts-file")?.addEventListener("change", (e) => { if (e.target.files[0]) this.parseAccountsFile(e.target.files[0]); });
+      this.container.addEventListener("change", (e) => {
+        if (e.target.id === "alias-switch-enabled" || e.target.id === "alias-switch-enabled-tab2") {
+          config.multiAccount.aliasSwitchEnabled = e.target.checked; saveConfig(config); this.updateEmailBar();
+        } else if (e.target.id === "global-location" || e.target.id === "global-visa-type") {
+          const l = Number(this.container.querySelector("#global-location").value);
+          const v = Number(this.container.querySelector("#global-visa-type").value);
+          this.container.querySelector("#global-visa-type").innerHTML = this.renderVisaTypeOptionsForLocation(l, v);
+          this.container.querySelector("#global-visa-subtype").innerHTML = this.renderGlobalVisaSubTypeOptionsForValues(l, v, 0);
+        } else if (e.target.id === "global-category") {
+          const idx = Number(e.target.value);
+          config.globalVisaSettings.categoryIndex = idx;
+          config.applicants.forEach((a) => (a.categoryIndex = idx));
+          saveConfig(config); this.updateCategoryBadges(); this.updateEmailBar();
         }
       });
-      this.container.querySelector("#test-otp-connection")?.addEventListener("click",async()=>{
-        const res=document.getElementById("test-result");
-        res.textContent="Testing...";res.style.color="yellow";
-        const mgr=new OTPManager();const r=await mgr.testConnection();
-        res.textContent=r.success?"✓ Connection successful":"✗ Connection failed";
-        res.style.color=r.success?"lightgreen":"salmon";
+      this.container.querySelector("#test-otp-connection")?.addEventListener("click", async () => {
+        const res = document.getElementById("test-result");
+        res.textContent = "Testing..."; res.style.color = "yellow";
+        const mgr = new OTPManager(); const r = await mgr.testConnection();
+        res.textContent = r.success ? "✓ Connection successful" : "✗ Connection failed";
+        res.style.color = r.success ? "lightgreen" : "salmon";
       });
     }
     parseAccountsFile(file) {
-      const reader=new FileReader();
-      reader.onload=(e)=>{
-        const accounts=e.target.result.split("\n").filter((l)=>l.trim()).map((line)=>{
-          const parts=line.trim().split(",");
-          if(parts.length<2)return null;
-          return{name:parts[0]||"",mail:parts[0],password:parts[1],profilePhotoId:"",applicantCount:config.globalVisaSettings.applicantCount,categoryIndex:config.globalVisaSettings.categoryIndex,locationIndex:config.globalVisaSettings.locationIndex,visaTypeIndex:config.globalVisaSettings.visaTypeIndex,visaSubTypeIndex:config.globalVisaSettings.visaSubTypeIndex,clickbtnsubmit:config.globalVisaSettings.clickbtnsubmit,surName:"",firstName:"",lastName:"",dateOfBirth:"",passportNumber:"",passportIssueDate:"",passportExpiryDate:"",issuePlace:"",mobile:"",email:""};
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const accounts = e.target.result.split("\n").filter((l) => l.trim()).map((line) => {
+          const parts = line.trim().split(",");
+          if (parts.length < 2) return null;
+          return { name: parts[0] || "", mail: parts[0], password: parts[1], profilePhotoId: "", applicantCount: config.globalVisaSettings.applicantCount, categoryIndex: Number(config.globalVisaSettings.categoryIndex), locationIndex: Number(config.globalVisaSettings.locationIndex), visaTypeIndex: Number(config.globalVisaSettings.visaTypeIndex), visaSubTypeIndex: Number(config.globalVisaSettings.visaSubTypeIndex), clickbtnsubmit: config.globalVisaSettings.clickbtnsubmit, surName: "", firstName: "", lastName: "", dateOfBirth: "", passportNumber: "", passportIssueDate: "", passportExpiryDate: "", issuePlace: "", mobile: "", email: "" };
         }).filter(Boolean);
-        if(accounts.length>0){config.applicants=accounts;saveConfig(config);this.refreshApplicantsTab();this.updateEmailBar();this.showNotification(accounts.length+" accounts loaded");}
+        if (accounts.length > 0) { config.applicants = accounts; saveConfig(config); this.refreshApplicantsTab(); this.updateEmailBar(); this.showNotification(accounts.length + " accounts loaded"); }
       };
       reader.readAsText(file);
     }
     setupTabNavigation() {
-      this.container.querySelectorAll(".settings-tab").forEach((tab)=>{
-        tab.addEventListener("click",(e)=>{
+      this.container.querySelectorAll(".settings-tab").forEach((tab) => {
+        tab.addEventListener("click", (e) => {
           e.preventDefault();
-          this.container.querySelectorAll(".settings-pane").forEach((p)=>p.classList.remove("active"));
-          this.container.querySelectorAll(".settings-tab").forEach((t)=>t.classList.remove("active"));
+          this.container.querySelectorAll(".settings-pane").forEach((p) => p.classList.remove("active"));
+          this.container.querySelectorAll(".settings-tab").forEach((t) => t.classList.remove("active"));
           e.target.classList.add("active");
-          this.container.querySelector("#"+e.target.dataset.tab+"-tab")?.classList.add("active");
+          this.container.querySelector("#" + e.target.dataset.tab + "-tab")?.classList.add("active");
         });
       });
     }
     refreshApplicantsTab() {
-      const tab=this.container.querySelector("#applicants-tab");
-      if(tab){tab.innerHTML=this.renderApplicantsTab();this.setupEventListeners();}
+      const tab = this.container.querySelector("#applicants-tab");
+      if (tab) { tab.innerHTML = this.renderApplicantsTab(); this.setupEventListeners(); }
     }
     showNotification(msg) {
-      const n=document.createElement("div");
-      Object.assign(n.style,{position:"fixed",bottom:"20px",right:"20px",background:"linear-gradient(135deg,#3D0C02,#5C1A08)",color:"#F5E6D0",padding:"12px 16px",borderRadius:"8px",zIndex:"999999",borderLeft:"4px solid #C9853A"});
-      n.textContent=msg;document.body.appendChild(n);
-      setTimeout(()=>{n.style.opacity="0";setTimeout(()=>n.remove(),150);},1000);
+      const n = document.createElement("div");
+      Object.assign(n.style, { position: "fixed", bottom: "20px", right: "20px", background: "linear-gradient(135deg,#3D0C02,#5C1A08)", color: "#F5E6D0", padding: "12px 16px", borderRadius: "8px", zIndex: "999999", borderLeft: "4px solid #C9853A" });
+      n.textContent = msg; document.body.appendChild(n);
+      setTimeout(() => { n.style.opacity = "0"; setTimeout(() => n.remove(), 150); }, 1000);
     }
     saveSettings() {
-      const q=(id)=>this.container.querySelector(id);
-      config.captcha.enabled=q("#captcha-enabled").checked?"on":"off";
-      config.captcha.apiKey=q("#captcha-api-key").value;
-      config.autoSubmitForms.login=q("#auto-login").checked?"on":"off";
-      config.autoSubmitForms.loginCaptcha=q("#auto-login-captcha").checked?"on":"off";
-      config.autoSubmitForms.appointmentCaptcha=q("#auto-appointment-captcha").checked?"on":"off";
-      config.autoSubmitForms.visaType=q("#auto-visa-type").checked?"on":"off";
-      config.autoSubmitForms.slotSelection=q("#auto-slot-selection").checked?"on":"off";
-      config.autoSubmitForms.applicantSelection=q("#auto-applicant-selection").checked?"on":"off";
-      const ae1=q("#alias-switch-enabled"),ae2=q("#alias-switch-enabled-tab2");
-      if(ae1)config.multiAccount.aliasSwitchEnabled=ae1.checked;else if(ae2)config.multiAccount.aliasSwitchEnabled=ae2.checked;
-      config.multiAccount.autoSwitch=!!q("#multi-account-enabled").checked;
-      config.multiAccount.enabled=!!q("#multi-account-enabled").checked;
-      config.submitTiming.login=parseInt(q("#timing-login").value)||0;
-      config.submitTiming.loginCaptcha=parseInt(q("#timing-login-captcha").value)||0;
-      config.submitTiming.appointmentCaptcha=parseInt(q("#timing-appointment-captcha").value)||0;
-      config.submitTiming.visaType=parseInt(q("#timing-visa-type").value)||0;
-      config.submitTiming.slotSelection=parseInt(q("#timing-slot-selection").value)||0;
-      config.submitTiming.applicantSelection=parseInt(q("#timing-applicant-selection").value)||0;
-      config.globalVisaSettings.categoryIndex=parseInt(q("#global-category").value)||0;
-      config.globalVisaSettings.locationIndex=parseInt(q("#global-location").value)||0;
-      config.globalVisaSettings.visaTypeIndex=parseInt(q("#global-visa-type").value)||0;
-      config.globalVisaSettings.visaSubTypeIndex=parseInt(q("#global-visa-subtype").value)||0;
-      config.globalVisaSettings.applicantCount=parseInt(q("#global-applicant-count").value)||1;
-      config.globalVisaSettings.clickbtnsubmit=q("#global-click-submit").checked;
-      config.otpServer.enabled=q("#otp-server-enabled").checked;
-      config.otpServer.email=q("#otp-server-email").value;
-      config.otpServer.password=q("#otp-server-password").value;
-      config.otpServer.checkInterval=Math.max(1000,parseInt(q("#otp-check-interval").value)||1000);
-      const curIdx=config.multiAccount.currentAccountIndex||0;
-      if(config.applicants[curIdx]){
-        config.applicants[curIdx].surName=document.getElementById("creation-surName")?.value||"";
-        config.applicants[curIdx].firstName=document.getElementById("creation-firstName")?.value||"";
-        config.applicants[curIdx].lastName=document.getElementById("creation-lastName")?.value||"";
-        config.applicants[curIdx].dateOfBirth=document.getElementById("creation-dob")?.value||"";
-        config.applicants[curIdx].passportNumber=document.getElementById("creation-passportNumber")?.value||"";
-        config.applicants[curIdx].passportIssueDate=document.getElementById("creation-passportIssueDate")?.value||"";
-        config.applicants[curIdx].passportExpiryDate=document.getElementById("creation-passportExpiryDate")?.value||"";
-        config.applicants[curIdx].issuePlace=document.getElementById("creation-issuePlace")?.value||"";
-        config.applicants[curIdx].mobile=document.getElementById("creation-mobile")?.value||"";
-        config.applicants[curIdx].email=document.getElementById("creation-email")?.value||"";
+      const q = (id) => this.container.querySelector(id);
+      config.captcha.enabled = q("#captcha-enabled").checked ? "on" : "off";
+      config.captcha.apiKey = q("#captcha-api-key").value;
+      config.autoSubmitForms.login = q("#auto-login").checked ? "on" : "off";
+      config.autoSubmitForms.loginCaptcha = q("#auto-login-captcha").checked ? "on" : "off";
+      config.autoSubmitForms.appointmentCaptcha = q("#auto-appointment-captcha").checked ? "on" : "off";
+      config.autoSubmitForms.visaType = q("#auto-visa-type").checked ? "on" : "off";
+      config.autoSubmitForms.slotSelection = q("#auto-slot-selection").checked ? "on" : "off";
+      config.autoSubmitForms.applicantSelection = q("#auto-applicant-selection").checked ? "on" : "off";
+      const ae1 = q("#alias-switch-enabled"), ae2 = q("#alias-switch-enabled-tab2");
+      if (ae1) config.multiAccount.aliasSwitchEnabled = ae1.checked; else if (ae2) config.multiAccount.aliasSwitchEnabled = ae2.checked;
+      config.multiAccount.autoSwitch = !!q("#multi-account-enabled").checked;
+      config.multiAccount.enabled = !!q("#multi-account-enabled").checked;
+      config.submitTiming.login = parseInt(q("#timing-login").value) || 0;
+      config.submitTiming.loginCaptcha = parseInt(q("#timing-login-captcha").value) || 0;
+      config.submitTiming.appointmentCaptcha = parseInt(q("#timing-appointment-captcha").value) || 0;
+      config.submitTiming.visaType = parseInt(q("#timing-visa-type").value) || 0;
+      config.submitTiming.slotSelection = parseInt(q("#timing-slot-selection").value) || 0;
+      config.submitTiming.applicantSelection = parseInt(q("#timing-applicant-selection").value) || 0;
+      // ---- SAVE WITH Number() TO AVOID STRING TYPE BUG ----
+      config.globalVisaSettings.categoryIndex = Number(q("#global-category").value);
+      config.globalVisaSettings.locationIndex = Number(q("#global-location").value);
+      config.globalVisaSettings.visaTypeIndex = Number(q("#global-visa-type").value);
+      config.globalVisaSettings.visaSubTypeIndex = Number(q("#global-visa-subtype").value);
+      config.globalVisaSettings.applicantCount = parseInt(q("#global-applicant-count").value) || 1;
+      config.globalVisaSettings.clickbtnsubmit = q("#global-click-submit").checked;
+      config.otpServer.enabled = q("#otp-server-enabled").checked;
+      config.otpServer.email = q("#otp-server-email").value;
+      config.otpServer.password = q("#otp-server-password").value;
+      config.otpServer.checkInterval = Math.max(1000, parseInt(q("#otp-check-interval").value) || 1000);
+      const curIdx = config.multiAccount.currentAccountIndex || 0;
+      if (config.applicants[curIdx]) {
+        config.applicants[curIdx].surName = document.getElementById("creation-surName")?.value || "";
+        config.applicants[curIdx].firstName = document.getElementById("creation-firstName")?.value || "";
+        config.applicants[curIdx].lastName = document.getElementById("creation-lastName")?.value || "";
+        config.applicants[curIdx].dateOfBirth = document.getElementById("creation-dob")?.value || "";
+        config.applicants[curIdx].passportNumber = document.getElementById("creation-passportNumber")?.value || "";
+        config.applicants[curIdx].passportIssueDate = document.getElementById("creation-passportIssueDate")?.value || "";
+        config.applicants[curIdx].passportExpiryDate = document.getElementById("creation-passportExpiryDate")?.value || "";
+        config.applicants[curIdx].issuePlace = document.getElementById("creation-issuePlace")?.value || "";
+        config.applicants[curIdx].mobile = document.getElementById("creation-mobile")?.value || "";
+        config.applicants[curIdx].email = document.getElementById("creation-email")?.value || "";
       }
-      const newApplicants=[];
-      this.container.querySelectorAll(".applicant-item").forEach((item)=>{
-        const i=parseInt(item.dataset.index,10);
-        const old=config.applicants[i]||{};
-        newApplicants.push({name:q(`#applicant-name-${i}`)?.value||"",mail:q(`#applicant-mail-${i}`)?.value||"",password:q(`#applicant-password-${i}`)?.value||"",profilePhotoId:old.profilePhotoId||"",applicantCount:config.globalVisaSettings.applicantCount,categoryIndex:config.globalVisaSettings.categoryIndex,locationIndex:config.globalVisaSettings.locationIndex,visaTypeIndex:config.globalVisaSettings.visaTypeIndex,visaSubTypeIndex:config.globalVisaSettings.visaSubTypeIndex,clickbtnsubmit:config.globalVisaSettings.clickbtnsubmit,surName:old.surName||"",firstName:old.firstName||"",lastName:old.lastName||"",dateOfBirth:old.dateOfBirth||"",passportNumber:old.passportNumber||"",passportIssueDate:old.passportIssueDate||"",passportExpiryDate:old.passportExpiryDate||"",issuePlace:old.issuePlace||"",mobile:old.mobile||"",email:old.email||""});
+      const newApplicants = [];
+      this.container.querySelectorAll(".applicant-item").forEach((item) => {
+        const i = parseInt(item.dataset.index, 10);
+        const old = config.applicants[i] || {};
+        newApplicants.push({ name: q(`#applicant-name-${i}`)?.value || "", mail: q(`#applicant-mail-${i}`)?.value || "", password: q(`#applicant-password-${i}`)?.value || "", profilePhotoId: old.profilePhotoId || "", applicantCount: config.globalVisaSettings.applicantCount, categoryIndex: Number(config.globalVisaSettings.categoryIndex), locationIndex: Number(config.globalVisaSettings.locationIndex), visaTypeIndex: Number(config.globalVisaSettings.visaTypeIndex), visaSubTypeIndex: Number(config.globalVisaSettings.visaSubTypeIndex), clickbtnsubmit: config.globalVisaSettings.clickbtnsubmit, surName: old.surName || "", firstName: old.firstName || "", lastName: old.lastName || "", dateOfBirth: old.dateOfBirth || "", passportNumber: old.passportNumber || "", passportIssueDate: old.passportIssueDate || "", passportExpiryDate: old.passportExpiryDate || "", issuePlace: old.issuePlace || "", mobile: old.mobile || "", email: old.email || "" });
       });
-      if(newApplicants.length>0)config.applicants=newApplicants;
+      if (newApplicants.length > 0) config.applicants = newApplicants;
       saveConfig(config);
       this.updateEmailBar();
-      if(window.otpManager){window.otpManager.stopMonitoring();}
-      if(config.otpServer.enabled){window.otpManager=new OTPManager();try{window.otpManager.init();}catch{}}
-      config.settingsVisible=false;
-      if(this.container)this.container.style.display="none";
-      setTimeout(()=>{if(confirm("Data saved. Do you want to open the registration page and auto-fill?")){window.location.href="https://algeria.blsspainglobal.com/dza/account/login";}},500);
+      if (window.otpManager) { window.otpManager.stopMonitoring(); }
+      if (config.otpServer.enabled) { window.otpManager = new OTPManager(); try { window.otpManager.init(); } catch {} }
+      config.settingsVisible = false;
+      if (this.container) this.container.style.display = "none";
+      setTimeout(() => { if (confirm("Data saved. Do you want to open the registration page and auto-fill?")) { window.location.href = "https://algeria.blsspainglobal.com/dza/account/login"; } }, 500);
     }
   }
+
   // ============================================================
   // LOGIN PAGE HANDLER
   // ============================================================
   class LoginPageHandler {
     start() {
-      try{$(".preloader").hide();}catch{}
-      try{$("#ReturnUrl").val($(".new-app-active").attr("href"));}catch{}
-      try{
-        const idx=config.multiAccount.currentAccountIndex||0;
-        const a=config.applicants[idx]||{};
-        if(!a.mail?.trim())return;
+      try { $(".preloader").hide(); } catch {}
+      try { $("#ReturnUrl").val($(".new-app-active").attr("href")); } catch {}
+      try {
+        const idx = config.multiAccount.currentAccountIndex || 0;
+        const a = config.applicants[idx] || {};
+        if (!a.mail?.trim()) return;
         $(":text[name]:visible").val(a.mail);
-        if(/on|true/.test(config.autoSubmitForms?.login)){setTimeout(()=>{$("#btnVerify").trigger("click");},config.submitTiming.login||0);}
-      }catch{}
+        if (/on|true/.test(config.autoSubmitForms?.login)) { setTimeout(() => { $("#btnVerify").trigger("click"); }, config.submitTiming.login || 0); }
+      } catch {}
     }
   }
+
   // ============================================================
   // LOGIN CAPTCHA HANDLER
   // ============================================================
   class LoginCaptchaHandler {
     start() {
-      try{$('<button class="btn btn-secondary position-absolute" onclick="window.HideLoader();" style="top:50%;margin-inline-start:50%;transform:translate(-50%,calc(100% + 1rem));">Hide Loader</button>').appendTo(".global-overlay-loader");$(".global-overlay").css("background-color","rgba(0 0 0 / 30%)");}catch{}
-      try{$(".entry-disabled:visible").off("copy paste");}catch{}
-      const applicant=this.getActiveApplicant();
-      try{if(applicant?.name)document.title=applicant.name;}catch{}
-      try{if(applicant?.profilePhotoId){$("img[alt=logo]").addClass("img-thumbnail").css({width:"128px",height:"128px",objectFit:"cover"}).attr("src","/DZA/query/getfile?fileid="+applicant.profilePhotoId);}}catch{}
-      try{if(applicant?.password)$(":password:visible").val(applicant.password);}catch{}
+      try { $('<button class="btn btn-secondary position-absolute" onclick="window.HideLoader();" style="top:50%;margin-inline-start:50%;transform:translate(-50%,calc(100% + 1rem));">Hide Loader</button>').appendTo(".global-overlay-loader"); $(".global-overlay").css("background-color", "rgba(0 0 0 / 30%)"); } catch {}
+      try { $(".entry-disabled:visible").off("copy paste"); } catch {}
+      const applicant = this.getActiveApplicant();
+      try { if (applicant?.name) document.title = applicant.name; } catch {}
+      try { if (applicant?.profilePhotoId) { $("img[alt=logo]").addClass("img-thumbnail").css({ width: "128px", height: "128px", objectFit: "cover" }).attr("src", "/DZA/query/getfile?fileid=" + applicant.profilePhotoId); } } catch {}
+      try { if (applicant?.password) $(":password:visible").val(applicant.password); } catch {}
       this.solveCaptcha();
     }
     getActiveApplicant() {
-      try{const emailText=$(":contains(Email:) > b").text();return config.applicants.find(({mail})=>mail===emailText);}catch{return null;}
+      try { const emailText = $(":contains(Email:) > b").text(); return config.applicants.find(({ mail }) => mail === emailText); } catch { return null; }
     }
     solveCaptcha() {
-      try{
-        if(!(/on|true/.test(config.captcha.enabled)&&config.captcha.apiKey))return;
-        const targetNumber=this.getCaptchaTarget();
-        const captchaImages=this.getCaptchaGrid();
-        const imageMap=(images)=>Object.fromEntries(images.map((img)=>img.src).entries());
-        const handleSolution=(solution)=>{
-          if(solution.status==="solved"){
-            Object.entries(solution.solution).forEach(([index,value])=>{if(value===targetNumber)captchaImages[index].click();});
-            if(/on|true/.test(config.autoSubmitForms?.loginCaptcha)){setTimeout(()=>{$("#btnVerify").trigger("click");},config.submitTiming.loginCaptcha||0);}
-          }else{handleError("captchaerror",solution);}
+      try {
+        if (!(/on|true/.test(config.captcha.enabled) && config.captcha.apiKey)) return;
+        const targetNumber = this.getCaptchaTarget();
+        const captchaImages = this.getCaptchaGrid();
+        const imageMap = (images) => Object.fromEntries(images.map((img) => img.src).entries());
+        const handleSolution = (solution) => {
+          if (solution.status === "solved") {
+            Object.entries(solution.solution).forEach(([index, value]) => { if (value === targetNumber) captchaImages[index].click(); });
+            if (/on|true/.test(config.autoSubmitForms?.loginCaptcha)) { setTimeout(() => { $("#btnVerify").trigger("click"); }, config.submitTiming.loginCaptcha || 0); }
+          }
         };
-        const handleError=(errorType,errorData)=>{console.error(errorType,errorData);$(".validation-summary-valid").html("<b>Failed to solve captcha.</b>");};
-        $.post({url:"https://backup1.nocaptchaai.com/solve",headers:{apiKey:config.captcha.apiKey},contentType:"application/json",dataType:"json",data:JSON.stringify({method:"ocr",id:"algeria",images:imageMap(captchaImages)}),timeout:30000,
-          beforeSend:function(){this._loading=$('<div class="d-flex align-items-center justify-content-center lead text-warning"><span class="spinner-grow"></span>&nbsp;Solving captcha ...</div>').prependTo(".main-div-container");},
-          complete:function(response,status){this._loading?.remove();switch(status){case"success":handleSolution(response.responseJSON);break;case"error":case"parsererror":handleError(status,response);break;}}
+        $.post({ url: "https://backup1.nocaptchaai.com/solve", headers: { apiKey: config.captcha.apiKey }, contentType: "application/json", dataType: "json", data: JSON.stringify({ method: "ocr", id: "algeria", images: imageMap(captchaImages) }), timeout: 30000,
+          beforeSend: function () { this._loading = $('<div class="d-flex align-items-center justify-content-center lead text-warning"><span class="spinner-grow"></span>&nbsp;Solving captcha ...</div>').prependTo(".main-div-container"); },
+          complete: function (response, status) { this._loading?.remove(); if (status === "success") handleSolution(response.responseJSON); }
         });
-      }catch(error){console.error("solveCaptcha error",error);}
+      } catch {}
     }
     getCaptchaTarget() {
-      try{return $(".box-label").sort((a,b)=>getComputedStyle(b).zIndex-getComputedStyle(a).zIndex).first().text().replace(/\D+/,"");}catch{return "";}
+      try { return $(".box-label").sort((a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex).first().text().replace(/\D+/, ""); } catch { return ""; }
     }
     getCaptchaGrid() {
-      try{const container=document.querySelector(".main-div-container")||document.body;return Array.from(container.querySelectorAll(".captcha-img")).slice(0,9).map((el)=>el instanceof HTMLImageElement?el:el.querySelector("img")).filter(Boolean);}catch{return [];}
+      try { const container = document.querySelector(".main-div-container") || document.body; return Array.from(container.querySelectorAll(".captcha-img")).slice(0, 9).map((el) => el instanceof HTMLImageElement ? el : el.querySelector("img")).filter(Boolean); } catch { return []; }
     }
   }
+
   // ============================================================
   // APPOINTMENT CAPTCHA HANDLER
   // ============================================================
   class AppointmentCaptchaHandler {
     start() {
-      try{$(".preloader").hide();}catch{}
-      try{$('<button class="btn btn-secondary position-absolute top-50 start-50 translate-middle-x mt-5" onclick="window.HideLoader();">Hide Loader</button>').appendTo(".global-overlay-loader");}catch{}
-      try{
-        if(!(/on|true/.test(config.captcha.enabled)&&config.captcha.apiKey))return;
-        const target=$(".box-label").first().text().replace(/\D+/,"");
-        const grid=Array.from((document.querySelector(".main-div-container")||document.body).querySelectorAll(".captcha-img")).slice(0,9).map((el)=>el instanceof HTMLImageElement?el:el.querySelector("img")).filter(Boolean);
-        if(!grid.length)return;
-        $.post({url:"https://backup1.nocaptchaai.com/solve",headers:{apiKey:config.captcha.apiKey},contentType:"application/json",dataType:"json",data:JSON.stringify({method:"ocr",id:"algeria",images:Object.fromEntries(grid.map((i)=>i.src).entries())}),timeout:30000,
-          complete:(xhr,status)=>{if(status==="success"&&xhr.responseJSON?.status==="solved"){Object.entries(xhr.responseJSON.solution).forEach(([i,v])=>{if(v===target)grid[i].click();});if(/on|true/.test(config.autoSubmitForms?.appointmentCaptcha)){setTimeout(()=>$("#btnVerify").trigger("click"),config.submitTiming.appointmentCaptcha||0);}}}
+      try { $(".preloader").hide(); } catch {}
+      try { $('<button class="btn btn-secondary position-absolute top-50 start-50 translate-middle-x mt-5" onclick="window.HideLoader();">Hide Loader</button>').appendTo(".global-overlay-loader"); } catch {}
+      try {
+        if (!(/on|true/.test(config.captcha.enabled) && config.captcha.apiKey)) return;
+        const target = $(".box-label").first().text().replace(/\D+/, "");
+        const grid = Array.from((document.querySelector(".main-div-container") || document.body).querySelectorAll(".captcha-img")).slice(0, 9).map((el) => el instanceof HTMLImageElement ? el : el.querySelector("img")).filter(Boolean);
+        if (!grid.length) return;
+        $.post({ url: "https://backup1.nocaptchaai.com/solve", headers: { apiKey: config.captcha.apiKey }, contentType: "application/json", dataType: "json", data: JSON.stringify({ method: "ocr", id: "algeria", images: Object.fromEntries(grid.map((i) => i.src).entries()) }), timeout: 30000,
+          complete: (xhr, status) => { if (status === "success" && xhr.responseJSON?.status === "solved") { Object.entries(xhr.responseJSON.solution).forEach(([i, v]) => { if (v === target) grid[i].click(); }); if (/on|true/.test(config.autoSubmitForms?.appointmentCaptcha)) { setTimeout(() => $("#btnVerify").trigger("click"), config.submitTiming.appointmentCaptcha || 0); } } }
         });
-      }catch{}
+      } catch {}
     }
   }
+
   // ============================================================
   // VISA TYPE HANDLER
   // ============================================================
   class VisaTypeHandler {
     #applicant;
     start() {
-      try{$(".preloader").hide();}catch{}
-      const emailOnPage=$(".avatar + > p.small").text();
-      this.#applicant=config.applicants.find(({mail})=>mail===emailOnPage)||config.applicants[config.multiAccount.currentAccountIndex||0];
-      if(this.#applicant)this.fillForm();
+      try { $(".preloader").hide(); } catch {}
+      const emailOnPage = $(".avatar + > p.small").text();
+      this.#applicant = config.applicants.find(({ mail }) => mail === emailOnPage) || config.applicants[config.multiAccount.currentAccountIndex || 0];
+      if (this.#applicant) this.fillForm();
     }
     async fillForm() {
-      const a=this.#applicant;
-      if(!a)return;
-      let{categoryIndex,locationIndex,visaTypeIndex,visaSubTypeIndex,applicantCount,clickbtnsubmit}=a;
-      visaSubTypeIndex=validateVisaSubType(locationIndex,visaTypeIndex,visaSubTypeIndex);
-      const targetSubTypeText=getVisaSubTypeText(locationIndex,visaTypeIndex,visaSubTypeIndex);
-      let catDD,locDD,visaTypeDD,visaSubDD,membersDD;
-      document.querySelectorAll("form .mb-3").forEach((section)=>{
-        if(window.getComputedStyle(section).display==="none")return;
-        const label=section.querySelector("label"),select=section.querySelector("select");
-        if(!label||!select)return;
-        const t=label.textContent.trim();
-        if(t.includes("Category"))catDD={dropdown:select};
-        else if(t.includes("Location"))locDD={dropdown:select};
-        else if(t.includes("Visa Type"))visaTypeDD={dropdown:select};
-        else if(t.includes("Visa Sub"))visaSubDD={dropdown:select};
-        else if(t.includes("Number Of"))membersDD={dropdown:select};
+      const a = this.#applicant;
+      if (!a) return;
+      let { categoryIndex, locationIndex, visaTypeIndex, visaSubTypeIndex, applicantCount, clickbtnsubmit } = a;
+      categoryIndex = Number(categoryIndex);
+      locationIndex = Number(locationIndex);
+      visaTypeIndex = Number(visaTypeIndex);
+      visaSubTypeIndex = Number(visaSubTypeIndex);
+      visaSubTypeIndex = validateVisaSubType(locationIndex, visaTypeIndex, visaSubTypeIndex);
+      const targetSubTypeText = getVisaSubTypeText(locationIndex, visaTypeIndex, visaSubTypeIndex);
+      let catDD, locDD, visaTypeDD, visaSubDD, membersDD;
+      document.querySelectorAll("form .mb-3").forEach((section) => {
+        if (window.getComputedStyle(section).display === "none") return;
+        const label = section.querySelector("label"), select = section.querySelector("select");
+        if (!label || !select) return;
+        const t = label.textContent.trim();
+        if (t.includes("Category")) catDD = { dropdown: select };
+        else if (t.includes("Location")) locDD = { dropdown: select };
+        else if (t.includes("Visa Type")) visaTypeDD = { dropdown: select };
+        else if (t.includes("Visa Sub")) visaSubDD = { dropdown: select };
+        else if (t.includes("Number Of")) membersDD = { dropdown: select };
       });
-      const selectOptionByText=(el,text)=>new Promise((resolve)=>{
-        if(!el)return resolve();
-        const ts=el.tomselect;
-        if(ts){const opt=Object.values(ts.options).find((o)=>o.text.trim()===text||o.text.includes(text));if(opt){ts.setValue(opt.value);ts.trigger("change");}}
-        else if(el.options){for(let i=0;i<el.options.length;i++){if(el.options[i].text.trim()===text||el.options[i].text.includes(text)){el.selectedIndex=i;el.dispatchEvent(new Event("change",{bubbles:true}));break;}}}
+      const selectOptionByText = (el, text) => new Promise((resolve) => {
+        if (!el) return resolve();
+        const ts = el.tomselect;
+        if (ts) { const opt = Object.values(ts.options).find((o) => o.text.trim() === text || o.text.includes(text)); if (opt) { ts.setValue(opt.value); ts.trigger("change"); } }
+        else if (el.options) { for (let i = 0; i < el.options.length; i++) { if (el.options[i].text.trim() === text || el.options[i].text.includes(text)) { el.selectedIndex = i; el.dispatchEvent(new Event("change", { bubbles: true })); break; } } }
         resolve();
       });
-      const setByIndex=(dd,idx)=>{
-        if(!dd)return;
-        const ts=dd.dropdown.tomselect;
-        if(ts){const keys=Object.keys(ts.options);if(keys[idx]!==undefined)ts.setValue(keys[idx]);}
-        else if(dd.dropdown.options?.[idx]){dd.dropdown.selectedIndex=idx;dd.dropdown.dispatchEvent(new Event("change",{bubbles:true}));}
+      const setByIndex = (dd, idx) => {
+        if (!dd) return;
+        const ts = dd.dropdown.tomselect;
+        if (ts) { const keys = Object.keys(ts.options); if (keys[idx] !== undefined) ts.setValue(keys[idx]); }
+        else if (dd.dropdown.options?.[idx]) { dd.dropdown.selectedIndex = idx; dd.dropdown.dispatchEvent(new Event("change", { bubbles: true })); }
       };
-      setByIndex(catDD,categoryIndex);
-      setByIndex(locDD,locationIndex);
-      setByIndex(visaTypeDD,visaTypeIndex);
-      await new Promise((r)=>setTimeout(r,30));
-      if(visaSubDD&&targetSubTypeText)await selectOptionByText(visaSubDD.dropdown,targetSubTypeText);
-      const type=applicantCount>1?"Family":"Individual";
+      setByIndex(catDD, categoryIndex);
+      setByIndex(locDD, locationIndex);
+      setByIndex(visaTypeDD, visaTypeIndex);
+      await new Promise((r) => setTimeout(r, 30));
+      if (visaSubDD && targetSubTypeText) await selectOptionByText(visaSubDD.dropdown, targetSubTypeText);
+      const type = applicantCount > 1 ? "Family" : "Individual";
       $("#AppointmentFor").val(type);
-      const radio=$(`:radio:visible`).filter(`[value="${type}"]`).prop("checked",true);
-      if(type==="Family"){
-        try{const id=radio.prop("id").substring(type.length);const val=(globalWindow.applicantsNoData?.find((x)=>x.Name.startsWith(applicantCount))?.Value)||applicantCount;$("#members"+id).show().children(":text").val(val);}catch(e){}
+      const radio = $(`:radio:visible`).filter(`[value="${type}"]`).prop("checked", true);
+      if (type === "Family") {
+        try { const id = radio.prop("id").substring(type.length); const val = (globalWindow.applicantsNoData?.find((x) => x.Name.startsWith(applicantCount))?.Value) || applicantCount; $("#members" + id).show().children(":text").val(val); } catch (e) {}
       }
-      if(applicantCount>1&&membersDD)setByIndex(membersDD,applicantCount-2);
-      const submitBtn=document.querySelector("#btnSubmit");
-      if(/on|true/.test(config.autoSubmitForms?.visaType)&&submitBtn&&clickbtnsubmit){
-        setTimeout(()=>{try{const r=OnSubmitVisaType.call(submitBtn);if(r!==false){const f=submitBtn.form||submitBtn.closest("form");if(f){f.action="/dza/appointment/appointmentcaptcha";f.submit();}}}catch{}},config.submitTiming.visaType||0);
+      if (applicantCount > 1 && membersDD) setByIndex(membersDD, applicantCount - 2);
+      const submitBtn = document.querySelector("#btnSubmit");
+      if (/on|true/.test(config.autoSubmitForms?.visaType) && submitBtn && clickbtnsubmit) {
+        setTimeout(() => { try { const r = OnSubmitVisaType.call(submitBtn); if (r !== false) { const f = submitBtn.form || submitBtn.closest("form"); if (f) { f.action = "/dza/appointment/appointmentcaptcha"; f.submit(); } } } catch {} }, config.submitTiming.visaType || 0);
       }
     }
   }
+
   // ============================================================
   // APPLICANT SELECTION HANDLER
   // ============================================================
   class ApplicantSelectionHandler {
     start() {
-      try{$(".modal:not(#logoutModal)").on("show.bs.modal",(e)=>e.preventDefault());}catch{}
-      try{$(".preloader").hide();}catch{}
-      const applicant=this._getActiveApplicant();
-      try{if(applicant?.profilePhotoId){$("#ApplicantPhotoId").val(applicant.profilePhotoId);$("#uploadfile-1-preview").attr("src","/dza/query/getfile?fileid="+applicant.profilePhotoId);}}catch{}
-      try{$("div[id^=app-]").first().trigger("click");}catch{}
-      try{
-        const d=new Date();d.setMonth(d.getMonth()+1);
-        const travelInput=document.getElementById("TravelDate");
-        if(travelInput){if(travelInput._flatpickr)travelInput._flatpickr.setDate(d,true);else{travelInput.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;travelInput.dispatchEvent(new Event("change",{bubbles:true}));}}
-        $("#EmailCode").prop("oncopy",null).prop("onpaste",null);
-      }catch{}
+      try { $(".modal:not(#logoutModal)").on("show.bs.modal", (e) => e.preventDefault()); } catch {}
+      try { $(".preloader").hide(); } catch {}
+      const applicant = this._getActiveApplicant();
+      try { if (applicant?.profilePhotoId) { $("#ApplicantPhotoId").val(applicant.profilePhotoId); $("#uploadfile-1-preview").attr("src", "/dza/query/getfile?fileid=" + applicant.profilePhotoId); } } catch {}
+      try { $("div[id^=app-]").first().trigger("click"); } catch {}
+      try {
+        const d = new Date(); d.setMonth(d.getMonth() + 1);
+        const travelInput = document.getElementById("TravelDate");
+        if (travelInput) { if (travelInput._flatpickr) travelInput._flatpickr.setDate(d, true); else { travelInput.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; travelInput.dispatchEvent(new Event("change", { bubbles: true })); } }
+        $("#EmailCode").prop("oncopy", null).prop("onpaste", null);
+      } catch {}
       this.injectOtpButton();
       this.startOtpMonitoring();
       this.sendTelegramNotification();
     }
     injectOtpButton() {
-      const deadline=Date.now()+10000;
-      const iv=setInterval(()=>{
-        const field=document.getElementById("EmailCode");
-        if(field&&!document.getElementById("manual-otp-button")){
+      const deadline = Date.now() + 10000;
+      const iv = setInterval(() => {
+        const field = document.getElementById("EmailCode");
+        if (field && !document.getElementById("manual-otp-button")) {
           clearInterval(iv);
-          const btn=document.createElement("button");
-          btn.id="manual-otp-button";btn.type="button";btn.innerHTML="Get OTP";
-          btn.addEventListener("click",()=>this.manualGetOtp());
-          field.parentNode.insertBefore(btn,field.nextSibling);
+          const btn = document.createElement("button");
+          btn.id = "manual-otp-button"; btn.type = "button"; btn.innerHTML = "Get OTP";
+          btn.addEventListener("click", () => this.manualGetOtp());
+          field.parentNode.insertBefore(btn, field.nextSibling);
           return;
         }
-        if(Date.now()>deadline)clearInterval(iv);
-      },500);
+        if (Date.now() > deadline) clearInterval(iv);
+      }, 500);
     }
     manualGetOtp() {
-      if(!config.otpServer?.enabled||!config.otpServer?.email||!config.otpServer?.password){showNotification("OTP server not configured","warning");return;}
-      const btn=document.getElementById("manual-otp-button");
-      const orig=btn.innerHTML;
-      btn.innerHTML="Searching...";btn.disabled=true;
-      (async()=>{
-        try{
-          const mgr=window.otpManager||new OTPManager();
-          if(!mgr.token)await mgr.loginMailTm();
+      if (!config.otpServer?.enabled || !config.otpServer?.email || !config.otpServer?.password) { showNotification("OTP server not configured", "warning"); return; }
+      const btn = document.getElementById("manual-otp-button");
+      const orig = btn.innerHTML;
+      btn.innerHTML = "Searching..."; btn.disabled = true;
+      (async () => {
+        try {
+          const mgr = window.otpManager || new OTPManager();
+          if (!mgr.token) await mgr.loginMailTm();
           await mgr.fetchOTP();
-          let otp="";
-          try{otp=GM_getValue("anis_otp_value","");}catch{otp=localStorage.getItem("anis_otp_value")||"";}
-          if(otp){btn.innerHTML="OTP: "+otp;showNotification("OTP found: "+otp,"info");}
-          else{btn.innerHTML=orig;btn.disabled=false;showNotification("OTP not found","warning");}
-        }catch{btn.innerHTML=orig;btn.disabled=false;}
+          let otp = "";
+          try { otp = GM_getValue("anis_otp_value", ""); } catch { otp = localStorage.getItem("anis_otp_value") || ""; }
+          if (otp) { btn.innerHTML = "OTP: " + otp; showNotification("OTP found: " + otp, "info"); }
+          else { btn.innerHTML = orig; btn.disabled = false; showNotification("OTP not found", "warning"); }
+        } catch { btn.innerHTML = orig; btn.disabled = false; }
       })();
     }
     startOtpMonitoring() {
-      if(config.otpServer?.enabled&&config.otpServer?.email&&config.otpServer?.password){
-        window.otpManager=window.otpManager||new OTPManager();
-        try{window.otpManager.init();}catch{}
+      if (config.otpServer?.enabled && config.otpServer?.email && config.otpServer?.password) {
+        window.otpManager = window.otpManager || new OTPManager();
+        try { window.otpManager.init(); } catch {}
       }
     }
     _getActiveApplicant() {
-      try{const e=$(".avatar + p.small").text();return config.applicants.find(({mail})=>mail===e);}catch{return null;}
+      try { const e = $(".avatar + p.small").text(); return config.applicants.find(({ mail }) => mail === e); } catch { return null; }
     }
     sendTelegramNotification() {
-      try{
-        const a=this._getActiveApplicant()||config.applicants[config.multiAccount.currentAccountIndex||0];
-        if(!a)return;
-        const loc=["Oran","Algiers"][a.locationIndex]||"Unknown";
-        const cat=["Normal","Premium","Prime Time"][a.categoryIndex]||"Unknown";
-        let date="Not specified";
-        for(const inp of document.querySelectorAll('.flatpickr-input, input[type="date"]')){if(inp.value){date=inp.value;break;}}
-        TelegramSender.sendMessage(`<b>APPLICANT SELECTION DETECTED</b>\n\n<b>Center:</b> ${loc}\n<b>Category:</b> ${cat}\n<b>Applicants:</b> ${a.applicantCount||1}\n<b>Date:</b> ${date}\n\n<i>${new Date().toLocaleString()}</i>`);
-      }catch{}
+      try {
+        const a = this._getActiveApplicant() || config.applicants[config.multiAccount.currentAccountIndex || 0];
+        if (!a) return;
+        const loc = ["Oran", "Algiers"][Number(a.locationIndex)] || "Unknown";
+        const cat = ["Normal", "Premium", "Prime Time"][Number(a.categoryIndex)] || "Unknown";
+        let date = "Not specified";
+        for (const inp of document.querySelectorAll('.flatpickr-input, input[type="date"]')) { if (inp.value) { date = inp.value; break; } }
+        TelegramSender.sendMessage(`<b>APPLICANT SELECTION DETECTED</b>\n\n<b>Center:</b> ${loc}\n<b>Category:</b> ${cat}\n<b>Applicants:</b> ${a.applicantCount || 1}\n<b>Date:</b> ${date}\n\n<i>${new Date().toLocaleString()}</i>`);
+      } catch {}
     }
   }
+
   // ============================================================
   // DATA PROTECTION CHECK
   // ============================================================
   (function checkDataProtectionAcceptance() {
-    const el=document.querySelector("p.alert.alert-success");
-    if(el?.textContent.includes("Successfully received your data protection information acceptance")){
-      setTimeout(()=>{window.location.href="https://algeria.blsspainglobal.com/dza/appointmentdata/myappointments";},1000);
+    const el = document.querySelector("p.alert.alert-success");
+    if (el?.textContent.includes("Successfully received your data protection information acceptance")) {
+      setTimeout(() => { window.location.href = "https://algeria.blsspainglobal.com/dza/appointmentdata/myappointments"; }, 1000);
     }
   })();
+
   // ============================================================
   // INIT: Client button in email bar
   // ============================================================
   (function initClientButtons() {
-    if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",initClientButtons,{once:true});return;}
-    setTimeout(()=>{
-      const bar=document.getElementById("email-bar");
-      if(bar){
-        const btn=document.createElement("button");
-        btn.innerHTML=" Clients";
-        btn.style.cssText="background:linear-gradient(135deg,#C9853A,#E8A84E);color:#3D0C02;border:none;padding:4px 10px;border-radius:12px;cursor:pointer;font-size:11px;font-weight:bold;margin-left:8px;";
-        btn.addEventListener("click",()=>createClientButtons());
+    if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", initClientButtons, { once: true }); return; }
+    setTimeout(() => {
+      const bar = document.getElementById("email-bar");
+      if (bar) {
+        const btn = document.createElement("button");
+        btn.innerHTML = " Clients";
+        btn.style.cssText = "background:linear-gradient(135deg,#C9853A,#E8A84E);color:#3D0C02;border:none;padding:4px 10px;border-radius:12px;cursor:pointer;font-size:11px;font-weight:bold;margin-left:8px;";
+        btn.addEventListener("click", () => createClientButtons());
         bar.querySelector(".email-right")?.appendChild(btn);
       }
-    },5000);
+    }, 5000);
   })();
-  const settingsUI=new SettingsUI();
+
+  const settingsUI = new SettingsUI();
+
   // ============================================================
   // PAGE ERROR HANDLER
   // ============================================================
   (function handlePageErrors() {
-    window.addEventListener("load",()=>{const h5=document.querySelector("h5");if(h5?.textContent.includes("We're sorry, something went wrong")){setTimeout(()=>window.history.back(),200);}},{once:true});
-    if(location.hostname==="algeria.blsspainglobal.com"){
-      const importantPaths=["/appointment/applicantselection","/appointment/slotselection","/appointment/liveness","/appointment/payment"];
-      const isImportant=importantPaths.some((p)=>location.pathname.toLowerCase().includes(p));
-      function checkErrors(){
-        try{
-          if(document.body.innerHTML.trim()===""||document.body.childElementCount===0){setTimeout(()=>window.location.reload(true),1000);return;}
-          let hasError=false;
-          document.querySelectorAll("h5,li").forEach((el)=>{if(el.textContent.trim()==="An error occured while processing your request. Please try again after sometime")hasError=true;});
-          if(document.querySelector("input#lcHo"))hasError=true;
-          if(hasError){setTimeout(()=>location.reload(),500);return;}
-          const title=document.title;
-          const h1=document.getElementsByTagName("h1")[0]?.innerText||"";
-          const bodyText=document.body?.innerText||"";
-          const badTitles=["504 Bad Gateway ERROR","502 Bad Gateway ERROR","504 Gateway Time-out","503 Service Temporarily Unavailable","500 Internal Server Error","Application Temporarily Unavailable","Backend service does not exist","ERROR: The request could not be satisfied"];
-          const badH1s=["502 Bad Gateway","403 ERROR","502 Bad Gateway ERROR"];
-          const isCloudFrontError=bodyText.includes("Generated by cloudfront")||bodyText.includes("The request could not be satisfied")||bodyText.includes("We can't connect to the server");
-          if(document.body.childElementCount<=1||badTitles.includes(title)||badH1s.includes(h1)||isCloudFrontError){setTimeout(()=>window.location.reload(true),1000);return;}
-          if(["Too Many Requests","429 Too Many Requests","403 Forbidden"].includes(title)){
-            if(isImportant)setTimeout(()=>window.location.reload(true),30000);
-            else setTimeout(()=>{window.location.href="https://algeria.blsspainglobal.com/dza/Account/LogIn";},500);
+    window.addEventListener("load", () => { const h5 = document.querySelector("h5"); if (h5?.textContent.includes("We're sorry, something went wrong")) { setTimeout(() => window.history.back(), 200); } }, { once: true });
+    if (location.hostname === "algeria.blsspainglobal.com") {
+      const importantPaths = ["/appointment/applicantselection", "/appointment/slotselection", "/appointment/liveness", "/appointment/payment"];
+      const isImportant = importantPaths.some((p) => location.pathname.toLowerCase().includes(p));
+      function checkErrors() {
+        try {
+          if (document.body.innerHTML.trim() === "" || document.body.childElementCount === 0) { setTimeout(() => window.location.reload(true), 1000); return; }
+          let hasError = false;
+          document.querySelectorAll("h5,li").forEach((el) => { if (el.textContent.trim() === "An error occured while processing your request. Please try again after sometime") hasError = true; });
+          if (document.querySelector("input#lcHo")) hasError = true;
+          if (hasError) { setTimeout(() => location.reload(), 500); return; }
+          const title = document.title;
+          if (["Too Many Requests", "429 Too Many Requests", "403 Forbidden"].includes(title)) {
+            if (isImportant) setTimeout(() => window.location.reload(true), 30000);
+            else setTimeout(() => { window.location.href = "https://algeria.blsspainglobal.com/dza/Account/LogIn"; }, 500);
           }
-          if(bodyText.includes("Max challenge attempts exceeded"))setTimeout(()=>location.reload(),500);
-        }catch{}
+          if ((document.body?.innerText || "").includes("Max challenge attempts exceeded")) setTimeout(() => location.reload(), 1000);
+        } catch {}
       }
       checkErrors();
-      new MutationObserver(checkErrors).observe(document.body,{childList:true,subtree:true});
-      if(/^\/dza\/appointment\/captcha/.test(location.pathname)){
-        (function click(){const h5=[...document.querySelectorAll("h5")].find((el)=>el.textContent.trim()==="Book New Appointment -");const link=document.querySelector("a.nav-link.new-app-active");if(h5&&link)link.click();else setTimeout(click,1000);})();
+      new MutationObserver(checkErrors).observe(document.body, { childList: true, subtree: true });
+      if (/^\/dza\/appointment\/captcha/.test(location.pathname)) {
+        (function click() { const h5 = [...document.querySelectorAll("h5")].find((el) => el.textContent.trim() === "Book New Appointment -"); const link = document.querySelector("a.nav-link.new-app-active"); if (h5 && link) link.click(); else setTimeout(click, 1000); })();
       }
-      window.addEventListener("load",()=>{const alertEl=document.querySelector(".alert.alert-danger strong");if(alertEl?.textContent.includes("maximum number of allowed captcha")||alertEl?.textContent.includes("Captcha id already exist")){setTimeout(()=>{window.location.href="https://algeria.blsspainglobal.com/dza/Account/LogIn";},1000);}},{once:true});
-      const redirectMap={"https://algeria.blsspainglobal.com/dza/home/index":"https://algeria.blsspainglobal.com/dza/appointment/newappointment","https://algeria.blsspainglobal.com/dza/account/changepassword":"https://algeria.blsspainglobal.com/dza/appointment/newappointment"};
-      const cur=window.location.href.toLowerCase();
-      for(const[from,to]of Object.entries(redirectMap)){if(cur.startsWith(from)){window.location.href=to;break;}}
+      window.addEventListener("load", () => { const alertEl = document.querySelector(".alert.alert-danger strong"); if (alertEl?.textContent.includes("maximum number of allowed captcha") || alertEl?.textContent.includes("Captcha id already exist")) { setTimeout(() => { window.location.href = "https://algeria.blsspainglobal.com/dza/Account/LogIn"; }, 1000); } }, { once: true });
+      const redirectMap = { "https://algeria.blsspainglobal.com/dza/home/index": "https://algeria.blsspainglobal.com/dza/appointment/newappointment", "https://algeria.blsspainglobal.com/dza/account/changepassword": "https://algeria.blsspainglobal.com/dza/appointment/newappointment" };
+      const cur = window.location.href.toLowerCase();
+      for (const [from, to] of Object.entries(redirectMap)) { if (cur.startsWith(from)) { window.location.href = to; break; } }
     }
   })();
+
   // ============================================================
   // AUTO RESET ON ERROR MESSAGES
   // ============================================================
   (function handleInvalidCaptchaReset() {
-    const msgs=["Invalid captcha selection","Invalid appointment request flow","The captcha you submitted is invalid","invalid request parameter","Invalid appointment request"];
-    let redirecting=false;
-    function restart(){if(redirecting)return;redirecting=true;window.location.href="https://algeria.blsspainglobal.com/dza/appointment/newappointment";}
-    function check(){if(redirecting)return;const body=document.body?.innerText||"";if(msgs.some((m)=>body.includes(m))){restart();}}
+    const msgs = ["Invalid captcha selection", "Invalid appointment request flow", "The captcha you submitted is invalid", "invalid request parameter", "Invalid appointment request"];
+    let redirecting = false;
+    function restart() { if (redirecting) return; redirecting = true; window.location.href = "https://algeria.blsspainglobal.com/dza/appointment/newappointment"; }
+    function check() { if (redirecting) return; const body = document.body?.innerText || ""; if (msgs.some((m) => body.includes(m))) { restart(); } }
     check();
-    const observer=new MutationObserver(check);
-    observer.observe(document.body,{childList:true,subtree:true,characterData:true});
-    setInterval(check,0);
+    const observer = new MutationObserver(check);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    setInterval(check, 0);
   })();
+
   // ============================================================
   // AUTO RELOAD VISATYPE
   // ============================================================
   (function autoReloadVisaTypePage() {
-    try{
-      if(!location.href.toLowerCase().includes("/appointment/visatype"))return;
-      const h5=document.querySelector("h5");
-      if(h5?.textContent?.trim()==="Book New Appointment - Slot Selection")return;
-      const sec=Math.max(1,parseInt(config.refreshIntervalSeconds||1,10));
-      setTimeout(()=>{try{location.reload();}catch{}},sec*1000);
-    }catch{}
+    try {
+      if (!location.href.toLowerCase().includes("/appointment/visatype")) return;
+      const h5 = document.querySelector("h5");
+      if (h5?.textContent?.trim() === "Book New Appointment - Slot Selection") return;
+      const sec = Math.max(1, parseInt(config.refreshIntervalSeconds || 1, 10));
+      setTimeout(() => { try { location.reload(); } catch {} }, sec * 1000);
+    } catch {}
   })();
+
   // ============================================================
   // COUNTDOWN TIMER
   // ============================================================
   (function countdownTimer() {
-    const COUNTDOWN_SECONDS=180;
-    const TARGET_URL="https://algeria.blsspainglobal.com/dza/appointment/newappointment";
-    const KEY_DEADLINE="bls_dz_deadline_ms";
-    const BOX_ID="bls-dz-countdown";
-    let tickTimer=null,isRedirecting=false;
-    function isOnVisatype(){return location.pathname.includes("/dza/appointment/visatype");}
-    function isOnSlotSelection(){return[...document.querySelectorAll("h5")].some((h5)=>h5.textContent?.trim()==="Book New Appointment - Slot Selection");}
-    function formatMMSS(ms){const s=Math.max(0,Math.floor(ms/1000));return`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;}
-    function has429(){return/429|too many requests|rate limit/i.test(document.body?.innerText||"")||/429|too many requests/i.test(document.title);}
-    function teardown(){sessionStorage.removeItem(KEY_DEADLINE);document.getElementById(BOX_ID)?.remove();if(tickTimer){clearInterval(tickTimer);tickTimer=null;}}
-    function createUI(){
-      if(document.getElementById(BOX_ID))return;
-      const box=document.createElement("div");
-      box.id=BOX_ID;
-      Object.assign(box.style,{position:"fixed",bottom:"16px",right:"16px",background:"linear-gradient(135deg,#8B0000,#C0392B)",color:"#F5E6D0",padding:"10px 14px",borderRadius:"10px",font:"600 14px system-ui",zIndex:"999999",display:"flex",alignItems:"center",gap:"8px",border:"1px solid rgba(201,133,58,0.4)"});
-      const label=document.createElement("div");label.textContent="Redirecting in";
-      const timeEl=document.createElement("div");timeEl.id="bls-timer";
-      Object.assign(timeEl.style,{font:"700 16px monospace",background:"rgba(0,0,0,0.3)",padding:"6px 10px",borderRadius:"6px",minWidth:"64px",textAlign:"center"});
-      box.append(label,timeEl);document.body.appendChild(box);
+    const COUNTDOWN_SECONDS = 180;
+    const TARGET_URL = "https://algeria.blsspainglobal.com/dza/appointment/newappointment";
+    const KEY_DEADLINE = "bls_dz_deadline_ms";
+    const BOX_ID = "bls-dz-countdown";
+    let tickTimer = null, isRedirecting = false;
+    function isOnVisatype() { return location.pathname.includes("/dza/appointment/visatype"); }
+    function isOnSlotSelection() { return [...document.querySelectorAll("h5")].some((h5) => h5.textContent?.trim() === "Book New Appointment - Slot Selection"); }
+    function formatMMSS(ms) { const s = Math.max(0, Math.floor(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; }
+    function has429() { return /429|too many requests|rate limit/i.test(document.body?.innerText || "") || /429|too many requests/i.test(document.title); }
+    function teardown() { sessionStorage.removeItem(KEY_DEADLINE); document.getElementById(BOX_ID)?.remove(); if (tickTimer) { clearInterval(tickTimer); tickTimer = null; } }
+    function createUI() {
+      if (document.getElementById(BOX_ID)) return;
+      const box = document.createElement("div");
+      box.id = BOX_ID;
+      Object.assign(box.style, { position: "fixed", bottom: "16px", right: "16px", background: "linear-gradient(135deg,#8B0000,#C0392B)", color: "#F5E6D0", padding: "10px 14px", borderRadius: "10px", font: "600 14px system-ui", zIndex: "999999", display: "flex", alignItems: "center", gap: "8px", border: "1px solid rgba(201,133,58,0.4)" });
+      const label = document.createElement("div"); label.textContent = "Redirecting in";
+      const timeEl = document.createElement("div"); timeEl.id = "bls-timer";
+      Object.assign(timeEl.style, { font: "700 16px monospace", background: "rgba(0,0,0,0.3)", padding: "6px 10px", borderRadius: "6px", minWidth: "64px", textAlign: "center" });
+      box.append(label, timeEl); document.body.appendChild(box);
     }
-    function startCountdown(){
-      if(!isOnVisatype()||isOnSlotSelection()||has429()||tickTimer){teardown();return;}
-      let deadline=Number(sessionStorage.getItem(KEY_DEADLINE));
-      if(!deadline||isNaN(deadline)||deadline<Date.now()){deadline=Date.now()+COUNTDOWN_SECONDS*1000;sessionStorage.setItem(KEY_DEADLINE,String(deadline));}
+    function startCountdown() {
+      if (!isOnVisatype() || isOnSlotSelection() || has429() || tickTimer) { teardown(); return; }
+      let deadline = Number(sessionStorage.getItem(KEY_DEADLINE));
+      if (!deadline || isNaN(deadline) || deadline < Date.now()) { deadline = Date.now() + COUNTDOWN_SECONDS * 1000; sessionStorage.setItem(KEY_DEADLINE, String(deadline)); }
       createUI();
-      const tick=()=>{
-        if(has429()||!isOnVisatype()||isOnSlotSelection()){teardown();return;}
-        const left=Number(sessionStorage.getItem(KEY_DEADLINE))-Date.now();
-        const timeEl=document.getElementById("bls-timer");
-        if(left<=0){if(!has429()&&!isRedirecting){isRedirecting=true;teardown();window.location.href=TARGET_URL;}else teardown();}
-        else if(timeEl){if(left<=10000)timeEl.style.background="rgba(0,0,0,0.5)";timeEl.textContent=formatMMSS(left);}
+      const tick = () => {
+        if (has429() || !isOnVisatype() || isOnSlotSelection()) { teardown(); return; }
+        const left = Number(sessionStorage.getItem(KEY_DEADLINE)) - Date.now();
+        const timeEl = document.getElementById("bls-timer");
+        if (left <= 0) { if (!has429() && !isRedirecting) { isRedirecting = true; teardown(); window.location.href = TARGET_URL; } else teardown(); }
+        else if (timeEl) { if (left <= 10000) timeEl.style.background = "rgba(0,0,0,0.5)"; timeEl.textContent = formatMMSS(left); }
       };
       tick();
-      tickTimer=setInterval(tick,100);
+      tickTimer = setInterval(tick, 100);
     }
-    if(isOnVisatype()&&!isOnSlotSelection())startCountdown();
+    if (isOnVisatype() && !isOnSlotSelection()) startCountdown();
   })();
+
   // ============================================================
   // GENERIC ERROR REDIRECT
   // ============================================================
   (function handleGenericError() {
-    function checkAndRedirect(){
-      try{
-        if(window._errorRedirectTriggered)return;
-        const body=document.body?.innerText||"";
-        if(body.includes("An error occured while processing your request")||body.includes("Please try again after sometime")){
-          window._errorRedirectTriggered=true;
-          window.location.href="https://algeria.blsspainglobal.com/dza/appointment/newappointment";
+    function checkAndRedirect() {
+      try {
+        if (window._errorRedirectTriggered) return;
+        const body = document.body?.innerText || "";
+        if (body.includes("An error occured while processing your request") || body.includes("Please try again after sometime")) {
+          window._errorRedirectTriggered = true;
+          window.location.href = "https://algeria.blsspainglobal.com/dza/appointment/newappointment";
         }
-      }catch{}
+      } catch {}
     }
-    if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",checkAndRedirect,{once:true});
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", checkAndRedirect, { once: true });
     else checkAndRedirect();
-    registerDOMCallback("genericError",checkAndRedirect);
+    registerDOMCallback("genericError", checkAndRedirect);
   })();
+
   // ============================================================
   // SYNC BUTTONS (Export/Import)
   // ============================================================
   (function injectSyncButtons() {
-    const KEYS=["anis_config","selected_client","anis_lastUpdateCheck"];
-    function exportData(){
-      const bundle={};
-      KEYS.forEach((k)=>{const v=localStorage.getItem(k);if(v!==null)bundle[k]=v;});
-      if(!Object.keys(bundle).length){alert("No data.");return;}
-      const json=JSON.stringify(bundle),b64=btoa(unescape(encodeURIComponent(json)));
-      const cfg=JSON.parse(localStorage.getItem("anis_config")||"{}"),count=(cfg.applicants||[]).length;
-      const modal=document.createElement("div");
-      modal.style.cssText="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:linear-gradient(135deg,#2A0701,#4A1205);border:1px solid rgba(201,133,58,0.4);border-radius:12px;padding:20px;z-index:99999;width:520px;max-width:95vw;color:#F5E6D0;font-family:Arial,sans-serif;";
-      modal.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><b style="color:#E8A84E;">Export (${count} accounts)</b><button id="sync-close" style="background:linear-gradient(135deg,#8B0000,#C0392B);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;">✕</button></div><textarea readonly style="width:100%;height:110px;background:rgba(0,0,0,0.4);color:#E8A84E;border:1px solid rgba(201,133,58,0.3);border-radius:6px;padding:8px;font-size:11px;font-family:monospace;">${b64}</textarea><div style="display:flex;gap:10px;margin-top:12px;"><button id="sync-copy" style="flex:1;background:linear-gradient(135deg,#C9853A,#E8A84E);color:#3D0C02;border:none;border-radius:6px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;">Copy</button><button id="sync-dl" style="flex:1;background:rgba(201,133,58,0.2);color:#E8A84E;border:1px solid rgba(201,133,58,0.4);border-radius:6px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;">Download</button></div>`;
+    const KEYS = ["anis_config", "selected_client", "anis_lastUpdateCheck"];
+    function exportData() {
+      const bundle = {};
+      KEYS.forEach((k) => { const v = localStorage.getItem(k); if (v !== null) bundle[k] = v; });
+      if (!Object.keys(bundle).length) { alert("No data."); return; }
+      const json = JSON.stringify(bundle), b64 = btoa(unescape(encodeURIComponent(json)));
+      const cfg = JSON.parse(localStorage.getItem("anis_config") || "{}"), count = (cfg.applicants || []).length;
+      const modal = document.createElement("div");
+      modal.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:linear-gradient(135deg,#2A0701,#4A1205);border:1px solid rgba(201,133,58,0.4);border-radius:12px;padding:20px;z-index:99999;width:520px;max-width:95vw;color:#F5E6D0;font-family:Arial,sans-serif;";
+      modal.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><b style="color:#E8A84E;">Export (${count} accounts)</b><button id="sync-close" style="background:linear-gradient(135deg,#8B0000,#C0392B);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;">✕</button></div><textarea readonly style="width:100%;height:110px;background:rgba(0,0,0,0.4);color:#E8A84E;border:1px solid rgba(201,133,58,0.3);border-radius:6px;padding:8px;font-size:11px;font-family:monospace;">${b64}</textarea><div style="display:flex;gap:10px;margin-top:12px;"><button id="sync-copy" style="flex:1;background:linear-gradient(135deg,#C9853A,#E8A84E);color:#3D0C02;border:none;border-radius:6px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;">Copy</button><button id="sync-dl" style="flex:1;background:rgba(201,133,58,0.2);color:#E8A84E;border:1px solid rgba(201,133,58,0.4);border-radius:6px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;">Download</button></div>`;
       document.body.appendChild(modal);
-      modal.querySelector("#sync-close").onclick=()=>modal.remove();
-      modal.querySelector("#sync-copy").onclick=()=>{const ta=modal.querySelector("textarea");ta.select();document.execCommand("copy");modal.querySelector("#sync-copy").textContent="Copied!";};
-      modal.querySelector("#sync-dl").onclick=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([json],{type:"application/json"}));a.download="bls_sync_"+new Date().toISOString().slice(0,10)+".json";a.click();};
+      modal.querySelector("#sync-close").onclick = () => modal.remove();
+      modal.querySelector("#sync-copy").onclick = () => { const ta = modal.querySelector("textarea"); ta.select(); document.execCommand("copy"); modal.querySelector("#sync-copy").textContent = "Copied!"; };
+      modal.querySelector("#sync-dl").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([json], { type: "application/json" })); a.download = "bls_sync_" + new Date().toISOString().slice(0, 10) + ".json"; a.click(); };
     }
-    function importData(){
-      const modal=document.createElement("div");
-      modal.style.cssText="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:linear-gradient(135deg,#2A0701,#4A1205);border:1px solid rgba(201,133,58,0.4);border-radius:12px;padding:20px;z-index:99999;width:520px;max-width:95vw;color:#F5E6D0;font-family:Arial,sans-serif;";
-      modal.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><b style="color:#E8A84E;">Import</b><button id="imp-close" style="background:linear-gradient(135deg,#8B0000,#C0392B);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;">✕</button></div><textarea id="imp-ta" style="width:100%;height:110px;background:rgba(0,0,0,0.4);color:#F5E6D0;border:1px solid rgba(201,133,58,0.3);border-radius:6px;padding:8px;font-size:11px;font-family:monospace;" placeholder="Paste code here..."></textarea><div style="margin-top:12px;"><button id="imp-apply" style="background:linear-gradient(135deg,#C9853A,#E8A84E);color:#3D0C02;border:none;border-radius:6px;padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer;">Apply</button></div><div id="imp-result" style="margin-top:10px;font-size:12px;"></div>`;
+    function importData() {
+      const modal = document.createElement("div");
+      modal.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:linear-gradient(135deg,#2A0701,#4A1205);border:1px solid rgba(201,133,58,0.4);border-radius:12px;padding:20px;z-index:99999;width:520px;max-width:95vw;color:#F5E6D0;font-family:Arial,sans-serif;";
+      modal.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><b style="color:#E8A84E;">Import</b><button id="imp-close" style="background:linear-gradient(135deg,#8B0000,#C0392B);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;">✕</button></div><textarea id="imp-ta" style="width:100%;height:110px;background:rgba(0,0,0,0.4);color:#F5E6D0;border:1px solid rgba(201,133,58,0.3);border-radius:6px;padding:8px;font-size:11px;font-family:monospace;" placeholder="Paste code here..."></textarea><div style="margin-top:12px;"><button id="imp-apply" style="background:linear-gradient(135deg,#C9853A,#E8A84E);color:#3D0C02;border:none;border-radius:6px;padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer;">Apply</button></div><div id="imp-result" style="margin-top:10px;font-size:12px;"></div>`;
       document.body.appendChild(modal);
-      modal.querySelector("#imp-close").onclick=()=>modal.remove();
-      modal.querySelector("#imp-apply").onclick=()=>{
-        const raw=modal.querySelector("#imp-ta").value.trim();
-        const res=modal.querySelector("#imp-result");
-        if(!raw){res.innerHTML='<span style="color:#E8A84E">Paste code first.</span>';return;}
-        try{
-          let json;try{json=decodeURIComponent(escape(atob(raw)));}catch{json=raw;}
-          const bundle=JSON.parse(json);
-          KEYS.forEach((k)=>{if(bundle[k]!==undefined)localStorage.setItem(k,bundle[k]);});
-          const cfg=bundle["anis_config"]?JSON.parse(bundle["anis_config"]):{};
-          res.innerHTML=`<span style="color:#C9853A">${(cfg.applicants||[]).length} accounts imported! Reload.</span>`;
-          setTimeout(()=>modal.remove(),3000);
-        }catch{res.innerHTML='<span style="color:#C0392B">Invalid code.</span>';}
+      modal.querySelector("#imp-close").onclick = () => modal.remove();
+      modal.querySelector("#imp-apply").onclick = () => {
+        const raw = modal.querySelector("#imp-ta").value.trim();
+        const res = modal.querySelector("#imp-result");
+        if (!raw) { res.innerHTML = '<span style="color:#E8A84E">Paste code first.</span>'; return; }
+        try {
+          let json; try { json = decodeURIComponent(escape(atob(raw))); } catch { json = raw; }
+          const bundle = JSON.parse(json);
+          KEYS.forEach((k) => { if (bundle[k] !== undefined) localStorage.setItem(k, bundle[k]); });
+          const cfg = bundle["anis_config"] ? JSON.parse(bundle["anis_config"]) : {};
+          res.innerHTML = `<span style="color:#C9853A">${(cfg.applicants || []).length} accounts imported! Reload.</span>`;
+          setTimeout(() => modal.remove(), 3000);
+        } catch { res.innerHTML = '<span style="color:#C0392B">Invalid code.</span>'; }
       };
     }
-    function injectButtons(){
-      const actionsDiv=document.querySelector("#settings-container .settings-actions");
-      if(!actionsDiv||document.getElementById("sync-export-btn"))return;
-      const exp=document.createElement("button");exp.id="sync-export-btn";exp.className="btn btn-secondary";exp.textContent="Export";exp.onclick=exportData;
-      const imp=document.createElement("button");imp.id="sync-import-btn";imp.className="btn btn-secondary";imp.textContent="Import";imp.onclick=importData;
-      const save=actionsDiv.querySelector("#save-settings");
-      actionsDiv.insertBefore(imp,save);actionsDiv.insertBefore(exp,imp);
+    function injectButtons() {
+      const actionsDiv = document.querySelector("#settings-container .settings-actions");
+      if (!actionsDiv || document.getElementById("sync-export-btn")) return;
+      const exp = document.createElement("button"); exp.id = "sync-export-btn"; exp.className = "btn btn-secondary"; exp.textContent = "Export"; exp.onclick = exportData;
+      const imp = document.createElement("button"); imp.id = "sync-import-btn"; imp.className = "btn btn-secondary"; imp.textContent = "Import"; imp.onclick = importData;
+      const save = actionsDiv.querySelector("#save-settings");
+      actionsDiv.insertBefore(imp, save); actionsDiv.insertBefore(exp, imp);
     }
-    registerDOMCallback("syncButtons",()=>{if(document.querySelector("#settings-container .settings-actions"))injectButtons();});
+    registerDOMCallback("syncButtons", () => { if (document.querySelector("#settings-container .settings-actions")) injectButtons(); });
     injectButtons();
   })();
+
   // ============================================================
   // PAGE HANDLER DISPATCH
   // ============================================================
-  if(location.hostname==="algeria.blsspainglobal.com"){
-    try{
-      const matchPath=(path)=>new RegExp("^"+path.replace(/\/*$/,"").replace(/^\//,"/").replace(/\./,"\\.").replace(/\*/g,".*")+"\\/*$","i").test(location.pathname);
-      switch(true){
-        case detectCurrentPage()==="data_protection": new DataProtectionHandler().start();break;
-        case matchPath("/dza/account/login"): new LoginPageHandler().start();break;
-        case matchPath("/dza/newcaptcha/logincaptcha"): new LoginCaptchaHandler().start();break;
-        case matchPath("/dza/appointment/newappointment"): new AppointmentCaptchaHandler().start();break;
-        case matchPath("/dza/appointment/appointmentcaptcha"): new VisaTypeHandler().start();break;
+  if (location.hostname === "algeria.blsspainglobal.com") {
+    try {
+      const matchPath = (path) => new RegExp("^" + path.replace(/\/*$/, "").replace(/^\//, "/").replace(/\./, "\\.").replace(/\*/g, ".*") + "\\/*$", "i").test(location.pathname);
+      switch (true) {
+        case detectCurrentPage() === "data_protection": new DataProtectionHandler().start(); break;
+        case matchPath("/dza/account/login"): new LoginPageHandler().start(); break;
+        case matchPath("/dza/newcaptcha/logincaptcha"): new LoginCaptchaHandler().start(); break;
+        case matchPath("/dza/appointment/newappointment"): new AppointmentCaptchaHandler().start(); break;
+        case matchPath("/dza/appointment/appointmentcaptcha"): new VisaTypeHandler().start(); break;
         case matchPath("/dza/appointment/visatype/"):
         case matchPath("/dza/appointment/slotselection"):
-        case matchPath("/dza/appointment/applicantselection"): new ApplicantSelectionHandler().start();break;
-        case location.pathname.includes("/dza/account/register")||location.pathname.includes("/dza/Account/RegisterUser"): new RegistrationPageHandler().start();break;
+        case matchPath("/dza/appointment/applicantselection"): new ApplicantSelectionHandler().start(); break;
+        case location.pathname.includes("/dza/account/register") || location.pathname.includes("/dza/Account/RegisterUser"): new RegistrationPageHandler().start(); break;
       }
-    }catch(err){/* silent */}
+    } catch (err) { /* silent */ }
     setupAutoSwitchOnError();
   }
+
   // ============================================================
   // EMAIL BAR HIDE/SHOW
   // ============================================================
   (function handleEmailBarVisibility() {
-    const bar=document.getElementById("email-bar");
-    if(!bar)return;
-    bar.style.top="-50px";
-    let hideTimer=null,isHovering=false;
-    const showBar=()=>{bar.style.top="0";};
-    const hideBar=()=>{if(!isHovering)bar.style.top="-50px";};
-    document.addEventListener("mousemove",(e)=>{if(e.clientY<=30){showBar();clearTimeout(hideTimer);}else if(!isHovering){clearTimeout(hideTimer);hideTimer=setTimeout(hideBar,1000);}});
-    bar.addEventListener("mouseenter",()=>{isHovering=true;showBar();clearTimeout(hideTimer);});
-    bar.addEventListener("mouseleave",()=>{isHovering=false;clearTimeout(hideTimer);hideTimer=setTimeout(hideBar,1000);});
+    const bar = document.getElementById("email-bar");
+    if (!bar) return;
+    bar.style.top = "-50px";
+    let hideTimer = null, isHovering = false;
+    const showBar = () => { bar.style.top = "0"; };
+    const hideBar = () => { if (!isHovering) bar.style.top = "-50px"; };
+    document.addEventListener("mousemove", (e) => { if (e.clientY <= 30) { showBar(); clearTimeout(hideTimer); } else if (!isHovering) { clearTimeout(hideTimer); hideTimer = setTimeout(hideBar, 1000); } });
+    bar.addEventListener("mouseenter", () => { isHovering = true; showBar(); clearTimeout(hideTimer); });
+    bar.addEventListener("mouseleave", () => { isHovering = false; clearTimeout(hideTimer); hideTimer = setTimeout(hideBar, 1000); });
   })();
+
   // ============================================================
   // AUTO CANCELLATION OF APPOINTMENT
   // ============================================================
-  (function() {
-    const targetTexts=["You have initiated an appointment from your account or IP address which is not yet completed. Would you like to disregard that appointment and start a new one?","The appointment date and time you selected are already taken by other applicants. Please choose a different date and time","The appointment date and time you selected are already taken","An error occured while processing your request. Please try again after sometime","Due to unusual activity, we couldn't process your request right now. Please try again later"];
-    function checkForDialog(){
-      const found=targetTexts.some((text)=>document.body.innerText.includes(text));
-      if(found){
-        setTimeout(()=>{
-          const link=document.querySelector('a.btn.btn-secondary[href="/"]');
-          if(link){link.href="/dza/appointment/newappointment";link.click();}
-          else{window.location.href="/dza/appointment/newappointment";}
-        },12000);
-      }else{setTimeout(checkForDialog,1000);}
+  (function () {
+    const targetTexts = ["You have initiated an appointment from your account or IP address which is not yet completed. Would you like to disregard that appointment and start a new one?", "The appointment date and time you selected are already taken by other applicants. Please choose a different date and time", "The appointment date and time you selected are already taken", "An error occured while processing your request. Please try again after sometime", "Due to unusual activity, we couldn't process your request right now. Please try again later"];
+    function checkForDialog() {
+      const found = targetTexts.some((text) => document.body.innerText.includes(text));
+      if (found) {
+        setTimeout(() => {
+          const link = document.querySelector('a.btn.btn-secondary[href="/"]');
+          if (link) { link.href = "/dza/appointment/newappointment"; link.click(); }
+          else { window.location.href = "/dza/appointment/newappointment"; }
+        }, 12000);
+      } else { setTimeout(checkForDialog, 1000); }
     }
     checkForDialog();
   })();
+
   // ============================================================
   // EXPOSE BLSScript
   // ============================================================
-  window.BLSScript={
-    getConfig:()=>{try{return JSON.parse(JSON.stringify(config));}catch(e){return null;}},
-    saveConfig:(newCfg)=>{try{Object.assign(config,newCfg);saveConfig(config);if(window.settingsUIInstance)window.settingsUIInstance.updateEmailBar();return true;}catch(e){return false;}},
-    switchToAccount:(index)=>{if(!config.applicants||index<0||index>=config.applicants.length){return false;}config.multiAccount.currentAccountIndex=index;saveConfig(config);if(window.settingsUIInstance)window.settingsUIInstance.updateEmailBar();return true;},
-    showSettings:()=>{if(window.settingsUIInstance&&window.settingsUIInstance.container){window.settingsUIInstance.container.style.display="block";config.settingsVisible=true;saveConfig(config);}},
-    hideSettings:()=>{if(window.settingsUIInstance&&window.settingsUIInstance.container){window.settingsUIInstance.container.style.display="none";config.settingsVisible=false;saveConfig(config);}},
-    restartToNewAppointment:()=>{window.location.href="https://algeria.blsspainglobal.com/dza/appointment/newappointment";},
-    getCurrentAccount:()=>{const idx=config.multiAccount?.currentAccountIndex||0;return config.applicants?.[idx]||null;},
-    reloadPage:(force=false)=>{if(force)window.location.reload(true);else window.location.reload();},
-    status:()=>{/* silent */}
+  window.BLSScript = {
+    getConfig: () => { try { return JSON.parse(JSON.stringify(config)); } catch (e) { return null; } },
+    saveConfig: (newCfg) => { try { Object.assign(config, newCfg); saveConfig(config); if (window.settingsUIInstance) window.settingsUIInstance.updateEmailBar(); return true; } catch (e) { return false; } },
+    switchToAccount: (index) => { if (!config.applicants || index < 0 || index >= config.applicants.length) { return false; } config.multiAccount.currentAccountIndex = index; saveConfig(config); if (window.settingsUIInstance) window.settingsUIInstance.updateEmailBar(); return true; },
+    showSettings: () => { if (window.settingsUIInstance && window.settingsUIInstance.container) { window.settingsUIInstance.container.style.display = "block"; config.settingsVisible = true; saveConfig(config); } },
+    hideSettings: () => { if (window.settingsUIInstance && window.settingsUIInstance.container) { window.settingsUIInstance.container.style.display = "none"; config.settingsVisible = false; saveConfig(config); } },
+    restartToNewAppointment: () => { window.location.href = "https://algeria.blsspainglobal.com/dza/appointment/newappointment"; },
+    getCurrentAccount: () => { const idx = config.multiAccount?.currentAccountIndex || 0; return config.applicants?.[idx] || null; },
+    reloadPage: (force = false) => { if (force) window.location.reload(true); else window.location.reload(); },
+    status: () => { /* silent */ }
   };
 })();
